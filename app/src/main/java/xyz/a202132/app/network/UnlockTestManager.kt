@@ -67,7 +67,12 @@ object UnlockTestManager {
                 commandServer?.startOrReloadService(config, io.nekohasekai.libbox.OverrideOptions())
 
                 isRunning = true
-                waitSocksReady(socksPort)
+                val socksReady = waitSocksReady(socksPort)
+                if (!socksReady) {
+                    Log.e(TAG, "Session start failed: SOCKS not ready, sessionId=$sessionId, port=$socksPort")
+                    cleanup()
+                    return false
+                }
                 true
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to start unlock test session", e)
@@ -102,7 +107,7 @@ object UnlockTestManager {
         return Session(context.applicationContext, node, socksPort)
     }
 
-    // Backward-compatible singleton behavior for existing call sites.
+    // 对现有调用点保持向后兼容的单例行为
     private var legacySession: Session? = null
 
     @Synchronized
@@ -125,14 +130,17 @@ object UnlockTestManager {
         legacySession = null
     }
 
-    private fun waitSocksReady(port: Int, retries: Int = 8, delayMs: Long = 500) {
+    private fun waitSocksReady(port: Int, retries: Int = 8, delayMs: Long = 500): Boolean {
         repeat(retries) {
             try {
-                Socket("127.0.0.1", port).use { return }
+                Socket("127.0.0.1", port).use {
+                    return true
+                }
             } catch (_: Exception) {
                 Thread.sleep(delayMs)
             }
         }
+        return false
     }
 
 }

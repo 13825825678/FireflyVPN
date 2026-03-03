@@ -4,6 +4,7 @@ import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
+import xyz.a202132.app.AppConfig
 import xyz.a202132.app.data.model.Node
 import xyz.a202132.app.data.model.NodeType
 import xyz.a202132.app.data.model.ProxyMode
@@ -70,9 +71,36 @@ class SingBoxConfigGenerator {
      * 仍然支持单节点测试（用于Socket测试无法连接时的回退）
      */
     fun generateTestConfig(node: Node, localPort: Int = 10808): String {
+        val ipRegex = Regex("^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$")
+        val isDomainServer = !node.server.matches(ipRegex) && !node.server.contains(":")
         val config = JsonObject().apply {
             add("log", JsonObject().apply {
                 addProperty("level", "error")
+            })
+            add("dns", JsonObject().apply {
+                add("servers", JsonArray().apply {
+                    add(JsonObject().apply {
+                        addProperty("tag", "dns-direct")
+                        addProperty("address", AppConfig.VPN_DNS_PRIMARY)
+                        addProperty("detour", "direct")
+                    })
+                    add(JsonObject().apply {
+                        addProperty("tag", "dns-local")
+                        addProperty("address", AppConfig.VPN_DNS_CHINA)
+                        addProperty("detour", "direct")
+                    })
+                })
+                add("rules", JsonArray().apply {
+                    if (isDomainServer) {
+                        add(JsonObject().apply {
+                            add("domain", JsonArray().apply { add(node.server) })
+                            addProperty("server", "dns-local")
+                        })
+                    }
+                    add(JsonObject().apply {
+                        addProperty("server", "dns-direct")
+                    })
+                })
             })
             add("inbounds", JsonArray().apply {
                 add(JsonObject().apply {
@@ -88,8 +116,24 @@ class SingBoxConfigGenerator {
                     addProperty("type", "direct")
                     addProperty("tag", "direct")
                 })
+                add(JsonObject().apply {
+                    addProperty("type", "dns")
+                    addProperty("tag", "dns-out")
+                })
             })
             add("route", JsonObject().apply {
+                add("rules", JsonArray().apply {
+                    add(JsonObject().apply {
+                        addProperty("protocol", "dns")
+                        addProperty("outbound", "dns-out")
+                    })
+                    if (isDomainServer) {
+                        add(JsonObject().apply {
+                            add("domain", JsonArray().apply { add(node.server) })
+                            addProperty("outbound", "direct")
+                        })
+                    }
+                })
                 addProperty("final", "proxy")
             })
         }
@@ -114,12 +158,12 @@ class SingBoxConfigGenerator {
                 add("servers", JsonArray().apply {
                     add(JsonObject().apply {
                         addProperty("tag", "dns-direct")
-                        addProperty("address", "8.8.8.8")
+                        addProperty("address", AppConfig.VPN_DNS_PRIMARY)
                         addProperty("detour", "direct")
                     })
                     add(JsonObject().apply {
                         addProperty("tag", "dns-local")
-                        addProperty("address", "223.5.5.5")
+                        addProperty("address", AppConfig.VPN_DNS_CHINA)
                         addProperty("detour", "direct")
                     })
                 })
@@ -143,7 +187,7 @@ class SingBoxConfigGenerator {
                     val outboundTags = JsonArray()
                     nodes.forEach { outboundTags.add(it.id) }
                     add("outbounds", outboundTags)
-                    addProperty("url", "http://cp.cloudflare.com/generate_204")
+                    addProperty("url", AppConfig.URL_TEST_URL)
                     addProperty("interval", "10m")
                     addProperty("tolerance", 50)
                 })
@@ -186,12 +230,12 @@ class SingBoxConfigGenerator {
         val servers = JsonArray().apply {
             add(JsonObject().apply {
                 addProperty("tag", "google")
-                addProperty("address", "tls://8.8.8.8")
+                addProperty("address", "tls://${AppConfig.VPN_DNS_PRIMARY}")
                 addProperty("detour", "proxy") // DNS走代理组
             })
             add(JsonObject().apply {
                 addProperty("tag", "local")
-                addProperty("address", "223.5.5.5")
+                addProperty("address", AppConfig.VPN_DNS_CHINA)
                 addProperty("detour", "direct")
             })
         }
@@ -206,64 +250,27 @@ class SingBoxConfigGenerator {
             })
         }
         
-        // 2. Resolve Common CN Domains via Local DNS (Mirroring Route rules)
-        if (proxyMode == ProxyMode.SMART) {
-        // 2. Resolve Common CN Domains via Local DNS (Mirroring Route rules)
+        // 2. Resolve CN Domains via Local DNS (using rule_set)
         if (proxyMode == ProxyMode.SMART) {
             rules.add(JsonObject().apply {
-                add("domain_suffix", JsonArray().apply {
-                     add("cn")
-                     // Bilibili
-                     add("bilibili.com"); add("bilivideo.com"); add("bilivideo.cn"); add("biliapi.com"); add("biliapi.net"); add("hdslb.com")
-                     // Alibaba / Taobao / Alipay
-                     add("alibaba.com"); add("alibabagroup.com"); add("alicdn.com"); add("alikunlun.com"); add("alipay.com"); add("alipayobjects.com")
-                     add("aliyun.com"); add("aliyuncdn.com"); add("aliyuncs.com"); add("mmstat.com"); add("tanx.com"); add("taobao.com"); add("tmall.com")
-                     // Tencent / WeChat
-                     add("qq.com"); add("tencent.com"); add("weixin.com"); add("wechat.com"); add("qzone.com"); add("qcloud.com"); add("myqcloud.com")
-                     add("gtimg.com"); add("qpic.cn"); add("qlogo.cn"); add("weixinbridge.com")
-                     // ByteDance / Douyin / Toutiao
-                     add("bytedance.com"); add("douyin.com"); add("douyinpic.com"); add("douyinvod.com"); add("idouyinvod.com")
-                     add("snssdk.com"); add("pstatp.com"); add("ixigua.com"); add("byteimg.com"); add("toutiao.com"); add("toutiaocloud.com")
-                     // NetEase
-                     add("163.com"); add("126.net"); add("127.net"); add("netease.com"); add("music.126.net"); add("ydstatic.com")
-                     // Baidu
-                     add("baidu.com"); add("baidustatic.com"); add("bdstatic.com"); add("bdimg.com"); add("bcebos.com")
-                     // XiaoMi
-                     add("mi.com"); add("xiaomi.com"); add("xiaomiyoupin.com")
-                     // JD
-                     add("jd.com"); add("jd.hk"); add("360buy.com"); add("360buyimg.com")
-                     // Others
-                     add("zhihu.com"); add("zhimg.com"); add("weibo.com"); add("sina.com.cn"); add("sinajs.cn")
-                     add("xiaohongshu.com"); add("xhscdn.com"); add("meituan.com"); add("dianping.com"); add("ele.me")
-                     add("360.cn"); add("360.com"); add("sohu.com"); add("sogou.com"); add("xunlei.com")
-                     add("csdn.net"); add("cnblogs.com")
-                     add("amap.com"); add("autonavi.com"); add("gaode.com")
-                     add("iqiyi.com"); add("iqiyipic.com"); add("71.am"); add("youku.com"); add("ip138.com")
-                     add("bce.baidu.com") // Common issue fix
+                add("rule_set", JsonArray().apply {
+                    add("geosite-cn")
                 })
                 addProperty("server", "local")
             })
         }
-        }
-
-        // 3. Fallback to Google DNS (Remote)
-        rules.add(JsonObject().apply {
-            addProperty("server", "google")
-        })
         
         // DNS strategy based on IPv6 mode
         val dnsStrategy = when (ipv6Mode) {
             IPv6RoutingMode.ONLY -> "ipv6_only"
             IPv6RoutingMode.PREFER -> "prefer_ipv6"
-            // ENABLED 模式下，如果想要测试 IPv6，最好也稍微倾向 IPv6，或者使用 prefer_ipv4 (默认)
-            // 但用户反馈 ipcheck 不显示 ipv6，说明默认 prefer_ipv4 导致双栈站点走 IPv4。
-            // 为了更好的体验，ENABLED 可以保持 prefer_ipv4 保证速度，PREFER 用 prefer_ipv6
             else -> "prefer_ipv4"
         }
         
         return JsonObject().apply {
             add("servers", servers)
             add("rules", rules)
+            addProperty("final", "google")
             addProperty("strategy", dnsStrategy)
         }
     }
@@ -283,7 +290,7 @@ class SingBoxConfigGenerator {
                     // 必须使用 /126 或更小掩码，因为 system stack 需要至少一个额外的 IPv6 地址用于网关/路由
                     addProperty("inet6_address", "2001:db8::1/126")
                 }
-                addProperty("mtu", 9000)
+                addProperty("mtu", AppConfig.VPN_MTU)
                 addProperty("auto_route", true)
                 addProperty("strict_route", true)
                 
@@ -335,7 +342,7 @@ class SingBoxConfigGenerator {
             val outboundTags = JsonArray()
             nodes.forEach { outboundTags.add(it.id) }
             add("outbounds", outboundTags)
-            addProperty("url", "https://www.google.com/generate_204")
+            addProperty("url", AppConfig.URL_TEST_URL)
             addProperty("interval", "10m") 
             addProperty("tolerance", 50)
             addProperty("interrupt_exist_connections", false)
@@ -511,17 +518,38 @@ class SingBoxConfigGenerator {
     private fun createAnyTlsOutbound(node: Node): JsonObject {
         val rawLink = node.getRawLinkPlain()
         val uri = Uri.parse(rawLink)
-        val password = uri.userInfo ?: uri.getQueryParameter("password") ?: ""
+        val password = uri.userInfo ?: queryParamFirst(uri, "password", "pass", "token") ?: ""
+        val sni = queryParamFirst(uri, "sni", "host") ?: node.server
+        val insecure = queryParamEnabled(uri, "allowInsecure", "insecure", "skip-cert-verify")
+        val alpnValues = parseCsvParams(queryParamFirst(uri, "alpn"))
+        val fingerprint = queryParamFirst(uri, "fp", "fingerprint", "client-fingerprint")
+        val idleSessionCheckInterval = queryParamFirst(uri, "idle_session_check_interval")
+        val idleSessionTimeout = queryParamFirst(uri, "idle_session_timeout")
+        val minIdleSession = queryParamFirst(uri, "min_idle_session")?.toIntOrNull()
+        val maxIdleSession = queryParamFirst(uri, "max_idle_session")?.toIntOrNull()
 
         return JsonObject().apply {
             addProperty("type", "anytls")
             addProperty("server", node.server)
             addProperty("server_port", node.port)
             addProperty("password", password)
+            idleSessionCheckInterval?.let { addProperty("idle_session_check_interval", it) }
+            idleSessionTimeout?.let { addProperty("idle_session_timeout", it) }
+            minIdleSession?.let { addProperty("min_idle_session", it) }
+            maxIdleSession?.let { addProperty("max_idle_session", it) }
             add("tls", JsonObject().apply {
                 addProperty("enabled", true)
-                addProperty("server_name", uri.getQueryParameter("sni") ?: uri.getQueryParameter("host") ?: node.server)
-                addProperty("insecure", queryParamEnabled(uri, "allowInsecure", "insecure", "skip-cert-verify"))
+                addProperty("server_name", sni)
+                addProperty("insecure", insecure)
+                if (alpnValues.isNotEmpty()) {
+                    add("alpn", JsonArray().apply { alpnValues.forEach { add(it) } })
+                }
+                if (!fingerprint.isNullOrBlank()) {
+                    add("utls", JsonObject().apply {
+                        addProperty("enabled", true)
+                        addProperty("fingerprint", fingerprint)
+                    })
+                }
             })
         }
     }
@@ -710,6 +738,19 @@ class SingBoxConfigGenerator {
         }
     }
 
+    private fun queryParamFirst(uri: Uri, vararg names: String): String? {
+        return names.asSequence()
+            .mapNotNull { name -> uri.getQueryParameter(name)?.trim() }
+            .firstOrNull { it.isNotEmpty() }
+    }
+
+    private fun parseCsvParams(raw: String?): List<String> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return raw.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
     private fun parseWireGuardReserved(rawValue: String?): List<Int>? {
         if (rawValue.isNullOrBlank()) {
             return null
@@ -785,59 +826,18 @@ class SingBoxConfigGenerator {
         }
         
         if (proxyMode == ProxyMode.SMART) {
-            // Hardcoded Smart Routing Rules
-            // 4. Common CN Domains -> Direct
-            // 4. Common CN Domains -> Direct
+            // 4. CN Domains -> Direct (using geosite-cn rule_set)
             rules.add(JsonObject().apply {
-                add("domain_suffix", JsonArray().apply {
-                     add("cn")
-                     // Bilibili
-                     add("bilibili.com"); add("bilivideo.com"); add("bilivideo.cn"); add("biliapi.com"); add("biliapi.net"); add("hdslb.com")
-                     // Alibaba / Taobao / Alipay
-                     add("alibaba.com"); add("alibabagroup.com"); add("alicdn.com"); add("alikunlun.com"); add("alipay.com"); add("alipayobjects.com")
-                     add("aliyun.com"); add("aliyuncdn.com"); add("aliyuncs.com"); add("mmstat.com"); add("tanx.com"); add("taobao.com"); add("tmall.com")
-                     // Tencent / WeChat
-                     add("qq.com"); add("tencent.com"); add("weixin.com"); add("wechat.com"); add("qzone.com"); add("qcloud.com"); add("myqcloud.com")
-                     add("gtimg.com"); add("qpic.cn"); add("qlogo.cn"); add("weixinbridge.com")
-                     // ByteDance / Douyin / Toutiao
-                     add("bytedance.com"); add("douyin.com"); add("douyinpic.com"); add("douyinvod.com"); add("idouyinvod.com")
-                     add("snssdk.com"); add("pstatp.com"); add("ixigua.com"); add("byteimg.com"); add("toutiao.com"); add("toutiaocloud.com")
-                     // NetEase
-                     add("163.com"); add("126.net"); add("127.net"); add("netease.com"); add("music.126.net"); add("ydstatic.com")
-                     // Baidu
-                     add("baidu.com"); add("baidustatic.com"); add("bdstatic.com"); add("bdimg.com"); add("bcebos.com")
-                     // XiaoMi
-                     add("mi.com"); add("xiaomi.com"); add("xiaomiyoupin.com")
-                     // JD
-                     add("jd.com"); add("jd.hk"); add("360buy.com"); add("360buyimg.com")
-                     // Others
-                     add("zhihu.com"); add("zhimg.com"); add("weibo.com"); add("sina.com.cn"); add("sinajs.cn")
-                     add("xiaohongshu.com"); add("xhscdn.com"); add("meituan.com"); add("dianping.com"); add("ele.me")
-                     add("360.cn"); add("360.com"); add("sohu.com"); add("sogou.com"); add("xunlei.com")
-                     add("csdn.net"); add("cnblogs.com"); add("oschina.net")
-                     add("gitee.com")
-                     add("amap.com"); add("autonavi.com"); add("gaode.com")
-                     add("iqiyi.com"); add("iqiyipic.com"); add("71.am"); add("youku.com"); add("ip138.com")
-                     add("bce.baidu.com")
+                add("rule_set", JsonArray().apply {
+                    add("geosite-cn")
                 })
                 addProperty("outbound", "direct")
             })
 
-            // 5. Private IPs & CN DNS -> Direct
-            // 5. Private IPs & CN IPs -> Direct
-            // 5. Private IPs & CN IPs -> Direct
+            // 5. CN IPs -> Direct (using geoip-cn rule_set)
             rules.add(JsonObject().apply {
-                add("ip_cidr", JsonArray().apply {
-                    // Private IPv4
-                    add("10.0.0.0/8"); add("172.16.0.0/12"); add("192.168.0.0/16")
-                    add("127.0.0.0/8")
-                    // Private IPv6
-                    add("fc00::/7"); add("fe80::/10")
-                    
-                    // CN DNS
-                    add("223.5.5.5/32"); add("223.6.6.6/32")
-                    add("119.29.29.29/32"); add("114.114.114.114/32")
-                    add("180.76.76.76/32")
+                add("rule_set", JsonArray().apply {
+                    add("geoip-cn")
                 })
                 addProperty("outbound", "direct")
             })
@@ -863,6 +863,25 @@ class SingBoxConfigGenerator {
         
         return JsonObject().apply {
             add("rules", rules)
+            
+            // rule_set 声明（智能分流模式需要）
+            if (proxyMode == ProxyMode.SMART) {
+                add("rule_set", JsonArray().apply {
+                    add(JsonObject().apply {
+                        addProperty("tag", "geosite-cn")
+                        addProperty("type", "local")
+                        addProperty("format", "binary")
+                        addProperty("path", "geosite-cn.srs")
+                    })
+                    add(JsonObject().apply {
+                        addProperty("tag", "geoip-cn")
+                        addProperty("type", "local")
+                        addProperty("format", "binary")
+                        addProperty("path", "geoip-cn.srs")
+                    })
+                })
+            }
+            
             addProperty("final", "proxy")
             addProperty("auto_detect_interface", true)
         }

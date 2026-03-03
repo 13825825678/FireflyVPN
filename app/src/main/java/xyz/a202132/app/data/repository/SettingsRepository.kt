@@ -14,6 +14,7 @@ import xyz.a202132.app.data.model.ProxyMode
 import xyz.a202132.app.viewmodel.AutoTestLatencyMode
 import xyz.a202132.app.viewmodel.BestNodePriority
 import xyz.a202132.app.viewmodel.BUILTIN_PREFER_MODE_CHAT
+import xyz.a202132.app.viewmodel.StartupDefaultTestMode
 import xyz.a202132.app.viewmodel.TestPreferMode
 import xyz.a202132.app.viewmodel.UnlockPriorityMode
 import xyz.a202132.app.viewmodel.normalizePreferTestModes
@@ -66,6 +67,9 @@ class SettingsRepository(private val context: Context) {
 
         private val PREFER_TEST_MODES_JSON = stringPreferencesKey("prefer_test_modes_json")
         private val PREFER_TEST_SELECTED_MODE_ID = stringPreferencesKey("prefer_test_selected_mode_id")
+        private val STARTUP_DEFAULT_TEST_MODE = stringPreferencesKey("startup_default_test_mode")
+        private val STARTUP_DEFAULT_TEST_CHOICE_DONE = booleanPreferencesKey("startup_default_test_choice_done")
+        private val NODE_IP_INFO_TEST_ON_VPN_START = booleanPreferencesKey("node_ip_info_test_on_vpn_start")
     }
     
     val selectedNodeId: Flow<String?> = context.dataStore.data.map { preferences ->
@@ -435,6 +439,37 @@ class SettingsRepository(private val context: Context) {
     suspend fun setPreferTestSelectedModeId(modeId: String) {
         context.dataStore.edit { preferences ->
             preferences[PREFER_TEST_SELECTED_MODE_ID] = modeId
+        }
+    }
+
+    val startupDefaultTestMode: Flow<StartupDefaultTestMode> = context.dataStore.data.map { preferences ->
+        val value = preferences[STARTUP_DEFAULT_TEST_MODE] ?: StartupDefaultTestMode.NONE.name
+        runCatching { StartupDefaultTestMode.valueOf(value) }.getOrDefault(StartupDefaultTestMode.NONE)
+    }
+
+    suspend fun setStartupDefaultTestMode(mode: StartupDefaultTestMode) {
+        context.dataStore.edit { preferences ->
+            preferences[STARTUP_DEFAULT_TEST_MODE] = mode.name
+        }
+    }
+
+    val startupDefaultTestChoiceDone: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[STARTUP_DEFAULT_TEST_CHOICE_DONE] ?: false
+    }
+
+    suspend fun setStartupDefaultTestChoiceDone(done: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[STARTUP_DEFAULT_TEST_CHOICE_DONE] = done
+        }
+    }
+
+    val nodeIpInfoTestOnVpnStart: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[NODE_IP_INFO_TEST_ON_VPN_START] ?: false
+    }
+
+    suspend fun setNodeIpInfoTestOnVpnStart(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[NODE_IP_INFO_TEST_ON_VPN_START] = enabled
         }
     }
 

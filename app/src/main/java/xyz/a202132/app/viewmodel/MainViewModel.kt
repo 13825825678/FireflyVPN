@@ -1,9 +1,10 @@
-﻿package xyz.a202132.app.viewmodel
+package xyz.a202132.app.viewmodel
 
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
 import android.util.Log
+import com.google.gson.Gson
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -15,6 +16,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import okhttp3.MediaType.Companion.toMediaType
@@ -45,6 +47,12 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.TimeUnit
 import java.util.UUID
 
+enum class StartupDefaultTestMode {
+    NONE,
+    TCPING,
+    URL_TEST
+}
+
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     private val tag = "MainViewModel"
@@ -53,6 +61,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val settingsRepository = SettingsRepository(application)
     private val subscriptionParser = SubscriptionParser()
     private val latencyTester = LatencyTester()
+    private val gson = Gson()
     
     // 节流控制
     private val THROTTLE_INTERVAL = 5000L // 5秒节流间隔
@@ -60,7 +69,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastBackupSwitchTime = 0L
     private var lastCheckUpdateTime = 0L
     
-    // UI State
+    // UI状态
     private val _isLoading = MutableStateFlow(false)
     val isLoading = _isLoading.asStateFlow()
     
@@ -81,7 +90,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _notice = MutableStateFlow<NoticeInfo?>(null)
     val notice = _notice.asStateFlow()
     
-    // Persistent notice config (independent of dialog visibility)
+    // 持久通知配置（与对话框可见性无关）
     private val _noticeConfig = MutableStateFlow<NoticeInfo?>(null)
     val noticeConfig = _noticeConfig.asStateFlow()
     
@@ -93,14 +102,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val error = _error.asStateFlow()
     private val _infoDialogMessage = MutableStateFlow<String?>(null)
     val infoDialogMessage = _infoDialogMessage.asStateFlow()
+    private val _showStartupDefaultTestChoiceDialog = MutableStateFlow(false)
+    val showStartupDefaultTestChoiceDialog = _showStartupDefaultTestChoiceDialog.asStateFlow()
     
-    // Blocking Auto-Select State
+    // 阻止自动选择状态
     private val _isAutoSelecting = MutableStateFlow(false)
     val isAutoSelecting = _isAutoSelecting.asStateFlow()
 
     // 自动化测试状态
     private val _autoTestProgress = MutableStateFlow(AutoTestProgress())
     val autoTestProgress = _autoTestProgress.asStateFlow()
+    private val _autoTestResultSnapshot = MutableStateFlow<List<Node>>(emptyList())
+    val autoTestResultSnapshot = _autoTestResultSnapshot.asStateFlow()
     private var autoTestJob: Job? = null
     
     // Data
@@ -178,6 +191,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val autoTestNodeLimit = settingsRepository.autoTestNodeLimit.stateIn(viewModelScope, SharingStarted.Lazily, 20)
     val preferTestModes = settingsRepository.preferTestModes.stateIn(viewModelScope, SharingStarted.Lazily, builtInPreferTestModes())
     val preferTestSelectedModeId = settingsRepository.preferTestSelectedModeId.stateIn(viewModelScope, SharingStarted.Lazily, BUILTIN_PREFER_MODE_CHAT)
+    val startupDefaultTestMode = settingsRepository.startupDefaultTestMode.stateIn(viewModelScope, SharingStarted.Lazily, StartupDefaultTestMode.NONE)
+    val nodeIpInfoTestOnVpnStart = settingsRepository.nodeIpInfoTestOnVpnStart.stateIn(viewModelScope, SharingStarted.Lazily, false)
     
     val vpnState = ServiceManager.vpnState
     
@@ -220,7 +235,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _error.value = "APP启动后已自动执行${modeName}测试"
                         startAutomatedTest()
                     } else {
-                        fetchNodes(bypassThrottle = true)
+                        val fetchOk = fetchNodesInternal(
+                            bypassThrottle = true,
+                            runUrlTest = false,
+                            fetchingLabel = "请求节点中"
+                        )
+                        if (!fetchOk) return@collect
+                        val choiceDone = settingsRepository.startupDefaultTestChoiceDone.first()
+                        if (!choiceDone) {
+                            _showStartupDefaultTestChoiceDialog.value = true
+                        } else {
+                            launchStartupDefaultTestIfNeeded(showHint = false)
+                        }
                     }
                     checkNotice()
                     checkUpdate(isAuto = true)
@@ -298,117 +324,161 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * @param skipBackupMode 强制跳过备用模式逻辑 (用于回退场景，避免 DataStore 异步更新导致重复触发)
      */
-    fun fetchNodes(skipBackupMode: Boolean = false, bypassThrottle: Boolean = false, runUrlTest: Boolean = true) {
+    fun fetchNodes(
+        skipBackupMode: Boolean = false,
+        bypassThrottle: Boolean = false,
+        runUrlTest: Boolean = true,
+        allowWhenTestRunning: Boolean = false,
+        allowWhenFetchingInProgress: Boolean = false,
+        fetchingLabel: String = "请求节点中"
+    ) {
         viewModelScope.launch {
-            // 节流检查 (内部调用可跳过)
-            if (!bypassThrottle) {
-                val now = System.currentTimeMillis()
-                if (now - lastFetchNodesTime < THROTTLE_INTERVAL) {
-                    _error.value = "操作过于频繁，请稍后再试"
-                    return@launch
-                }
-                lastFetchNodesTime = now
+            fetchNodesInternal(
+                skipBackupMode = skipBackupMode,
+                bypassThrottle = bypassThrottle,
+                runUrlTest = runUrlTest,
+                allowWhenTestRunning = allowWhenTestRunning,
+                allowWhenFetchingInProgress = allowWhenFetchingInProgress,
+                fetchingLabel = fetchingLabel
+            )
+        }
+    }
+
+    private suspend fun fetchNodesInternal(
+        skipBackupMode: Boolean = false,
+        bypassThrottle: Boolean = false,
+        runUrlTest: Boolean = true,
+        allowWhenTestRunning: Boolean = false,
+        allowWhenFetchingInProgress: Boolean = false,
+        fetchingLabel: String = "请求节点中"
+    ): Boolean {
+        if (!allowWhenTestRunning && GlobalTestExecution.mutex.isLocked) {
+            _error.value = GlobalTestExecution.busyHint()
+            return false
+        }
+        if (!allowWhenFetchingInProgress && GlobalTestExecution.isFetching()) {
+            _error.value = GlobalTestExecution.fetchingHint()
+            return false
+        }
+
+        // 节流检查 (内部调用可跳过)
+        if (!bypassThrottle) {
+            val now = System.currentTimeMillis()
+            if (now - lastFetchNodesTime < THROTTLE_INTERVAL) {
+                _error.value = "操作过于频繁，请稍后再试"
+                return false
             }
-            
-            _isLoading.value = true
-            _filterUnavailable.value = false // 刷新时重置过滤
-            try {
-                // 1. 检查网络状态
-                if (!NetworkUtils.isNetworkAvailable(getApplication())) {
-                    _isLoading.value = false
-                     _error.value = "当前无网络连接，无法获取节点"
-                    return@launch
+            lastFetchNodesTime = now
+        }
+
+        GlobalTestExecution.beginFetching(fetchingLabel)
+        _isLoading.value = true
+        _filterUnavailable.value = false // 刷新时重置过滤
+        try {
+            // 1. 检查网络状态
+            if (!NetworkUtils.isNetworkAvailable(getApplication())) {
+                _error.value = "当前无网络连接，无法获取节点"
+                return false
+            }
+
+            // 2. 检查是否开启备用节点 (skipBackupMode 时强制为 false)
+            val isBackupEnabled = if (skipBackupMode) false else backupNodeEnabled.value
+            var targetUrl: String? = null
+
+            if (isBackupEnabled) {
+                // 每次刷新都获取最新 Notice 配置，确保能检测到远程配置变化
+                Log.d(tag, "Backup mode enabled, fetching latest notice config...")
+                val notice = fetchNoticeSync()
+
+                if (notice == null) {
+                    // Notice 请求失败 (服务器错误等)，触发回退
+                    Log.e(tag, "Failed to fetch notice for backup node")
+                    _error.value = "备用节点当前不可用，已退回默认节点！"
+                    handleBackupFallback()
+                    return false
                 }
-                
-                // 2. 检查是否开启备用节点 (skipBackupMode 时强制为 false)
-                val isBackupEnabled = if (skipBackupMode) false else backupNodeEnabled.value
-                var useBackup = false
-                var targetUrl: String? = null
-                
-                if (isBackupEnabled) {
-                    // 每次刷新都获取最新 Notice 配置，确保能检测到远程配置变化
-                    Log.d(tag, "Backup mode enabled, fetching latest notice config...")
-                    val notice = fetchNoticeSync()
-                    
-                    if (notice == null) {
-                        // Notice 请求失败 (服务器错误等)，触发回退
-                        Log.e(tag, "Failed to fetch notice for backup node")
-                        _error.value = "备用节点当前不可用，已退回默认节点！"
-                        handleBackupFallback()
-                        return@launch
-                    }
-                    
-                    // 验证备用节点配置有效性
-                    val backupUrl = notice.backupNodes?.url
-                    val isValidUrl = backupUrl != null && 
-                                     backupUrl.isNotBlank() && 
-                                     (backupUrl.startsWith("http://") || backupUrl.startsWith("https://"))
-                    
-                    if (isValidUrl) {
-                        useBackup = true
-                        targetUrl = backupUrl
-                        Log.d(tag, "Using backup node URL: $targetUrl")
-                    } else {
-                        // 配置无效 (无 backupNodes / 无 url / url 为空 / url 格式错误)
-                        // 触发完整回退
-                        Log.w(tag, "Backup node config invalid: backupNodes=$${notice.backupNodes}, url=$backupUrl")
-                        _error.value = "备用节点当前不可用，已退回默认节点！"
-                        handleBackupFallback()
-                        return@launch
-                    }
-                }
-                
-                val result = if (targetUrl != null) {
-                     subscriptionParser.fetchAndParse(targetUrl)
+
+                // 验证备用节点配置有效性
+                val backupUrl = notice.backupNodes?.url
+                val isValidUrl = backupUrl != null &&
+                    backupUrl.isNotBlank() &&
+                    (backupUrl.startsWith("http://") || backupUrl.startsWith("https://"))
+
+                if (isValidUrl) {
+                    targetUrl = backupUrl
+                    Log.d(tag, "Using backup node URL: $targetUrl")
                 } else {
-                     subscriptionParser.fetchAndParse()
+                    // 配置无效 (无 backupNodes / 无 url / url 为空 / url 格式错误)
+                    // 触发完整回退
+                    Log.w(tag, "Backup node config invalid: backupNodes=$${notice.backupNodes}, url=$backupUrl")
+                    _error.value = "备用节点当前不可用，已退回默认节点！"
+                    handleBackupFallback()
+                    return false
                 }
-
-                result.onSuccess { fetchedNodes ->
-                    // 检查由备用节点返回的空列表
-                    if (isBackupEnabled && fetchedNodes.isEmpty()) {
-                        Log.w(tag, "Backup node returned empty list, treating as failure")
-                        _error.value = "备用节点当前不可用，已退回默认节点！"
-                        handleBackupFallback()
-                        return@onSuccess
-                    }
-
-                    // 保存到数据库
-                    nodeDao.replaceAllNodes(fetchedNodes)
-
-                    if (BuildConfig.DEBUG) {
-                        viewModelScope.launch(Dispatchers.IO) {
-                            logRawLinkEncryptionStats("after_fetch_insert")
-                        }
-                    }
-                    
-                    // 自动测试延迟 (直接传入节点列表，避免等待 Flow 更新)
-                    // 用户更关心连通性与真实延迟，改用 URL Test
-                    if (runUrlTest) {
-                        urlTestAllNodes(fetchedNodes)
-                    }
-                    
-                    Log.d(tag, "Fetched ${fetchedNodes.size} nodes")
-                }.onFailure { e ->
-                    Log.e(tag, "Failed to fetch nodes", e)
-                    if (isBackupEnabled) {
-                        // 备用节点请求失败 (非网络原因，或者是备用URL本身有问题/服务器挂了)
-                        // 需求: "各种失败情况...均删除备用节点按钮并清空本地存储备用节点url...发送toast备用节点当前不可用，已退回默认节点！"
-                        
-                        _error.value = "备用节点当前不可用，已退回默认节点！"
-                        
-                        // 执行回退操作 (关闭，清除URL，重试默认)
-                        handleBackupFallback()
-                    } else {
-                        _error.value = "获取节点失败: ${e.message}"
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e(tag, "Error fetching nodes", e)
-                _error.value = "网络错误"
-            } finally {
-                _isLoading.value = false
             }
+
+            // 请求节点（失败自动重试一次）
+            var result = if (targetUrl != null) {
+                subscriptionParser.fetchAndParse(targetUrl)
+            } else {
+                subscriptionParser.fetchAndParse()
+            }
+            if (result.isFailure) {
+                Log.w(tag, "First fetch attempt failed, retrying...", result.exceptionOrNull())
+                _error.value = "请求节点失败，已自动重试..."
+                result = if (targetUrl != null) {
+                    subscriptionParser.fetchAndParse(targetUrl)
+                } else {
+                    subscriptionParser.fetchAndParse()
+                }
+            }
+
+            if (result.isSuccess) {
+                val fetchedNodes = result.getOrThrow()
+                // 检查由备用节点返回的空列表
+                if (isBackupEnabled && fetchedNodes.isEmpty()) {
+                    Log.w(tag, "Backup node returned empty list, treating as failure")
+                    _error.value = "备用节点当前不可用，已退回默认节点！"
+                    handleBackupFallback()
+                    return false
+                }
+
+                // 保存到数据库
+                nodeDao.replaceAllNodes(fetchedNodes)
+
+                if (BuildConfig.DEBUG) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        logRawLinkEncryptionStats("after_fetch_insert")
+                    }
+                }
+
+                // 自动测试延迟 (直接传入节点列表，避免等待 Flow 更新)
+                // 用户更关心连通性与真实延迟，改用 URL Test
+                if (runUrlTest) {
+                    urlTestAllNodes(fetchedNodes)
+                }
+
+                Log.d(tag, "Fetched ${fetchedNodes.size} nodes")
+                return true
+            } else {
+                val e = result.exceptionOrNull()
+                Log.e(tag, "Failed to fetch nodes", e)
+                if (isBackupEnabled) {
+                    _error.value = "备用节点当前不可用，已退回默认节点！"
+                    // 执行回退操作 (关闭，清除URL，重试默认)
+                    handleBackupFallback()
+                } else {
+                    _error.value = "获取节点失败: ${e?.message ?: "未知错误"}"
+                }
+                return false
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Error fetching nodes", e)
+            _error.value = "网络错误"
+            return false
+        } finally {
+            _isLoading.value = false
+            GlobalTestExecution.endFetching()
         }
     }
     
@@ -435,13 +505,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         
         // 5. 重新请求，强制跳过备用模式 (避免 DataStore 异步更新导致重复触发)
-        fetchNodes(skipBackupMode = true, bypassThrottle = true)
+        val fetchOk = fetchNodesInternal(
+            skipBackupMode = true,
+            bypassThrottle = true,
+            runUrlTest = false,
+            allowWhenFetchingInProgress = true,
+            fetchingLabel = "请求节点中"
+        )
+        if (!fetchOk) return
+        launchStartupDefaultTestIfNeeded(showHint = true)
     }
     
     // 辅助: 同步获取 Notice
     private suspend fun fetchNoticeSync(): NoticeInfo? {
         return try {
-            val info = NetworkClient.apiService.getNoticeInfo(AppConfig.NOTICE_URL)
+            val info = withTimeout(AppConfig.NOTICE_REQUEST_TIMEOUT_MS) {
+                NetworkClient.apiService.getNoticeInfo(AppConfig.NOTICE_URL)
+            }
             updateNoticeConfig(info)
             info
         } catch (e: Exception) {
@@ -469,6 +549,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     fun setBackupNodeEnabled(enabled: Boolean) {
         viewModelScope.launch {
+            if (GlobalTestExecution.isFetching()) {
+                _error.value = GlobalTestExecution.fetchingHint()
+                return@launch
+            }
+            if (_autoTestProgress.value.running || _isTesting.value || GlobalTestExecution.mutex.isLocked) {
+                _error.value = GlobalTestExecution.busyHint()
+                return@launch
+            }
+
             // 节流检查
             val now = System.currentTimeMillis()
             if (now - lastBackupSwitchTime < THROTTLE_INTERVAL) {
@@ -492,13 +581,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             settingsRepository.setBackupNodeEnabled(enabled)
             delay(100)
             
-            // 获取新的节点列表 (跳过节流检查，因为这是内部调用)
-            fetchNodes(bypassThrottle = true)
+            // 获取新的节点列表 (跳过节流检查，因为这是内部调用；测试行为跟随 APP 默认设置)
+            val fetchOk = fetchNodesInternal(
+                bypassThrottle = true,
+                runUrlTest = false,
+                fetchingLabel = "请求节点中"
+            )
+            if (!fetchOk) return@launch
+            launchStartupDefaultTestIfNeeded(showHint = true)
         }
     }
     
     fun testAllNodes(targetNodes: List<Node>? = null) {
         viewModelScope.launch {
+            if (GlobalTestExecution.isFetching()) {
+                _error.value = GlobalTestExecution.fetchingHint()
+                return@launch
+            }
+            if (!GlobalTestExecution.tryStart("TCPing 测试")) {
+                _error.value = GlobalTestExecution.busyHint()
+                return@launch
+            }
             _isTesting.value = true
             _testingLabel.value = "TCPing 测试中..."
             try {
@@ -509,6 +612,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             } finally {
                 _isTesting.value = false
                 _testingLabel.value = null
+                GlobalTestExecution.finish()
             }
         }
     }
@@ -519,7 +623,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * VPN 未运行 → 启动临时无头 sing-box 实例 (port 19090)
      */
     fun urlTestAllNodes(targetNodes: List<Node>? = null) {
+        urlTestAllNodesInternal(
+            targetNodes = targetNodes,
+            requireGlobalLock = true
+        )
+    }
+
+    private fun urlTestAllNodesInternal(
+        targetNodes: List<Node>? = null,
+        requireGlobalLock: Boolean,
+        onProgress: ((completed: Int, total: Int) -> Unit)? = null
+    ) {
         viewModelScope.launch {
+            var locked = false
+            if (requireGlobalLock) {
+                if (GlobalTestExecution.isFetching()) {
+                    _error.value = GlobalTestExecution.fetchingHint()
+                    return@launch
+                }
+                if (!GlobalTestExecution.tryStart("URL Test 测试")) {
+                    _error.value = GlobalTestExecution.busyHint()
+                    return@launch
+                }
+                locked = true
+            }
             _isTesting.value = true
             _testingLabel.value = "URL Test 测试中..."
             
@@ -599,6 +726,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 
                 val results = latencyTester.urlTestAllNodes(currentNodes, clashApiPort) { completed, total ->
                     _testingLabel.value = "URL Test 测试中 ($completed/$total)"
+                    onProgress?.invoke(completed, total)
                 }
                 Log.d(tag, "Got ${results.size} URL test results")
                 
@@ -635,6 +763,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
                 _isTesting.value = false
                 _testingLabel.value = null
+                if (locked) {
+                    GlobalTestExecution.finish()
+                }
             }
         }
     }
@@ -643,24 +774,66 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 打开节点列表并开始指定类型的测试
      */
     fun showNodeListForTest(testType: String) {
+        if (GlobalTestExecution.isFetching()) {
+            _error.value = GlobalTestExecution.fetchingHint()
+            return
+        }
+        if (_autoTestProgress.value.running || _isTesting.value || GlobalTestExecution.mutex.isLocked) {
+            _error.value = GlobalTestExecution.busyHint()
+            return
+        }
+        if (testType != "tcping" && testType != "urltest") {
+            return
+        }
+
         _showNodeList.value = true
         when (testType) {
             "tcping" -> testAllNodes()
             "urltest" -> urlTestAllNodes()
         }
     }
+
+    fun setStartupDefaultTestMode(mode: StartupDefaultTestMode) {
+        viewModelScope.launch {
+            settingsRepository.setStartupDefaultTestMode(mode)
+            settingsRepository.setStartupDefaultTestChoiceDone(true)
+        }
+    }
+
+    fun clearStartupDefaultTestMode() {
+        setStartupDefaultTestMode(StartupDefaultTestMode.NONE)
+    }
+
+    fun setNodeIpInfoTestOnVpnStart(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setNodeIpInfoTestOnVpnStart(enabled)
+        }
+    }
+
+    fun confirmStartupDefaultTestChoice(mode: StartupDefaultTestMode?) {
+        viewModelScope.launch {
+            if (mode == null) {
+                settingsRepository.setStartupDefaultTestMode(StartupDefaultTestMode.NONE)
+            } else {
+                settingsRepository.setStartupDefaultTestMode(mode)
+            }
+            settingsRepository.setStartupDefaultTestChoiceDone(true)
+            _showStartupDefaultTestChoiceDialog.value = false
+            if (mode != null && mode != StartupDefaultTestMode.NONE) {
+                launchStartupDefaultTestIfNeeded(showHint = false)
+            }
+        }
+    }
+
+    fun dismissStartupDefaultTestChoiceDialog() {
+        _showStartupDefaultTestChoiceDialog.value = false
+    }
     
     /**
      * 清理不可用节点 (UI 过滤，不删除数据库)
      */
     fun cleanUnavailableNodes() {
-        val hiddenCount = nodes.value.count { shouldHideByQuickCleanup(it) }
-        if (hiddenCount > 0) {
-            _filterUnavailable.value = true
-            _error.value = "已隐藏 $hiddenCount 个超时/不可用节点"
-        } else {
-            _error.value = "没有需要清理的超时/不可用节点"
-        }
+        hideUnqualifiedNodesInternal()
     }
 
     private fun shouldHideByQuickCleanup(node: Node): Boolean {
@@ -707,8 +880,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startPreferModeAutoSelectAndConnect(modeId: String) {
         viewModelScope.launch {
-            if (_autoTestProgress.value.running || _isTesting.value) {
-                _error.value = "测试正在进行中"
+            if (GlobalTestExecution.isFetching()) {
+                _error.value = GlobalTestExecution.fetchingHint()
+                return@launch
+            }
+            if (_autoTestProgress.value.running || _isTesting.value || GlobalTestExecution.mutex.isLocked) {
+                _error.value = GlobalTestExecution.busyHint()
                 return@launch
             }
             val mode = preferTestModes.value.firstOrNull { it.id == modeId }
@@ -744,6 +921,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 .let { filterPriorityReadyCandidates(it, priority) }
 
             if (candidates.isEmpty()) {
+                if (priority != BestNodePriority.LATENCY) {
+                    val latencyFallback = dbNodes.filter { it.isAvailable && it.latency > 0 }
+                    if (latencyFallback.isNotEmpty()) {
+                        val bestLatency = pickBestNode(latencyFallback, BestNodePriority.LATENCY, currentMode)
+                        if (bestLatency != null) {
+                            settingsRepository.setSelectedNodeId(bestLatency.id)
+                            if (connect) {
+                                ServiceManager.startVpn(getApplication(), bestLatency, proxyMode.value)
+                            }
+                            _error.value = if (connect) {
+                                "当前模式暂无${priorityDisplayName(priority)}数据，已按延迟优先连接：${bestLatency.getDisplayName()}"
+                            } else {
+                                "当前模式暂无${priorityDisplayName(priority)}数据，已按延迟优先选择：${bestLatency.getDisplayName()}"
+                            }
+                            return@launch
+                        }
+                    }
+                }
                 _infoDialogMessage.value = "已保存${priorityDisplayName(priority)}优先规则。\n\n当前模式还没有对应测试结果，请先点击“开始测试”，完成后再自动选择连接最优。"
                 return@launch
             }
@@ -751,6 +946,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val best = pickBestNode(candidates, priority, currentMode)
             if (best == null) {
                 _error.value = "没有可用于${priorityDisplayName(priority)}择优的节点"
+                return@launch
+            }
+            settingsRepository.setSelectedNodeId(best.id)
+            if (connect) {
+                ServiceManager.startVpn(getApplication(), best, proxyMode.value)
+            }
+            _error.value = if (connect) "已连接最优节点：${best.getDisplayName()}" else "已选择最优节点：${best.getDisplayName()}"
+        }
+    }
+
+    fun selectBestNodeByPriorityFromSnapshot(priority: BestNodePriority, connect: Boolean) {
+        viewModelScope.launch {
+            val currentMode = preferTestModes.value.firstOrNull { it.id == preferTestSelectedModeId.value }
+            if (currentMode == null) {
+                _error.value = "当前模式不存在，请重新选择模式"
+                return@launch
+            }
+            if (!isPrioritySupportedByMode(priority, currentMode)) {
+                _infoDialogMessage.value = "当前模式未启用${priorityDisplayName(priority)}相关测试。\n\n请先调整模式配置或重新执行测试。"
+                return@launch
+            }
+
+            val snapshotNodes = autoTestResultSnapshot.value
+            if (snapshotNodes.isEmpty()) {
+                _error.value = "当前没有可用的自动化测试结果快照，请先执行一次测试"
+                return@launch
+            }
+
+            val candidates = snapshotNodes
+                .filter { it.isAvailable }
+                .let { filterPriorityReadyCandidates(it, priority) }
+
+            if (candidates.isEmpty()) {
+                _infoDialogMessage.value = "快照中暂无${priorityDisplayName(priority)}可用数据，请重新执行测试后再自动连接最优。"
+                return@launch
+            }
+
+            val best = pickBestNode(candidates, priority, currentMode)
+            if (best == null) {
+                _error.value = "快照中没有可用于${priorityDisplayName(priority)}择优的节点"
                 return@launch
             }
             settingsRepository.setSelectedNodeId(best.id)
@@ -772,7 +1007,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun filterPriorityReadyCandidates(nodes: List<Node>, priority: BestNodePriority): List<Node> {
         return when (priority) {
-            BestNodePriority.LATENCY -> nodes.filter { it.autoTestedAt > 0L && it.latency > 0 }
+            BestNodePriority.LATENCY -> nodes.filter { it.latency > 0 }
             BestNodePriority.UPLOAD -> nodes.filter { it.autoTestedAt > 0L && it.uploadMbps > 0f }
             BestNodePriority.DOWNLOAD -> nodes.filter { it.autoTestedAt > 0L && it.downloadMbps > 0f }
             BestNodePriority.UNLOCK_COUNT -> nodes.filter {
@@ -791,19 +1026,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun hideUnqualifiedAutoTestNodes() {
-        val failed = nodes.value.count {
-            it.autoTestedAt > 0L && (
-                it.autoTestStatus.contains("FILTERED", ignoreCase = true) ||
-                    it.autoTestStatus.contains("FAILED", ignoreCase = true) ||
-                    !it.isAvailable
-                )
+        hideUnqualifiedNodesInternal()
+    }
+
+    private fun hideUnqualifiedNodesInternal() {
+        val hiddenCount = nodes.value.count { shouldHideByQuickCleanup(it) }
+        if (hiddenCount > 0) {
+            _filterUnavailable.value = true
+            _error.value = "隐藏${hiddenCount}个超时/不可用/未达标节点"
+        } else {
+            _error.value = "没有可隐藏的不合格节点"
         }
-        if (failed <= 0) {
-            _error.value = "没有未达标节点"
-            return
-        }
-        _filterUnavailable.value = true
-        _error.value = "已移除未达标节点（已隐藏 $failed 个）"
     }
     
     /**
@@ -917,12 +1150,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * 检查通知公告
      */
     private suspend fun checkNotice() {
-        try {
-            val noticeInfo = NetworkClient.apiService.getNoticeInfo(AppConfig.NOTICE_URL)
-            
+        val result = requestWithAutoRetry("公告通知") {
+            withTimeout(AppConfig.NOTICE_REQUEST_TIMEOUT_MS) {
+                NetworkClient.apiService.getNoticeInfo(AppConfig.NOTICE_URL)
+            }
+        }
+        result.onSuccess { noticeInfo ->
             // Always update config for features like Backup Node
             _noticeConfig.value = noticeInfo
-            
+
             if (noticeInfo.hasNotice) {
                 // 如果 showOnce 为 true，检查是否已显示过
                 // 如果 showOnce 为 false，则每次都显示
@@ -938,7 +1174,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 }
             }
-        } catch (e: Exception) {
+        }.onFailure { e ->
             Log.e(tag, "Failed to check notice", e)
         }
     }
@@ -960,8 +1196,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 lastCheckUpdateTime = now
             }
             
-            try {
-                val info = NetworkClient.apiService.getUpdateInfo(AppConfig.UPDATE_URL)
+            val result = requestWithAutoRetry("版本更新") {
+                withTimeout(AppConfig.UPDATE_REQUEST_TIMEOUT_MS) {
+                    NetworkClient.apiService.getUpdateInfo(AppConfig.UPDATE_URL)
+                }
+            }
+            result.onSuccess { info ->
                 val currentVersionCode = getApplication<Application>().packageManager
                     .getPackageInfo(getApplication<Application>().packageName, 0)
                     .let { 
@@ -980,11 +1220,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         _error.value = "已是最新版本"
                     }
                 }
-            } catch (e: Exception) {
+            }.onFailure { e ->
                 Log.e(tag, "Failed to check update", e)
-                if (!isAuto) {
-                    _error.value = "检查更新失败"
-                }
             }
         }
     }
@@ -1062,7 +1299,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     context.startActivity(intent)
                 } else {
                      _error.value = "安装文件丢失，请重新下载"
-                     // Reset state to allow re-download
+                     // 重置状态以允许重新下载
                      DownloadManager.resetState()
                 }
             } catch (e: Exception) {
@@ -1353,6 +1590,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         )
 
         autoTestJob = viewModelScope.launch {
+            _autoTestResultSnapshot.value = emptyList()
+            if (GlobalTestExecution.isFetching()) {
+                _error.value = GlobalTestExecution.fetchingHint()
+                _isAutoSelecting.value = false
+                return@launch
+            }
+            if (!GlobalTestExecution.tryStart("测试择优")) {
+                _error.value = GlobalTestExecution.busyHint()
+                _isAutoSelecting.value = false
+                return@launch
+            }
             try {
                 _autoTestProgress.value = AutoTestProgress(
                     running = true,
@@ -1360,10 +1608,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     message = "正在拉取节点..."
                 )
 
-                fetchNodes(bypassThrottle = true, runUrlTest = false)
-                waitForCondition(timeoutMs = 25_000) { !isLoading.value && nodes.value.isNotEmpty() }
+                val fetchOk = fetchNodesInternal(
+                    bypassThrottle = true,
+                    runUrlTest = false,
+                    allowWhenTestRunning = true,
+                    fetchingLabel = "请求节点中"
+                )
+                if (!fetchOk) {
+                    _error.value = "自动化测试失败：请求节点失败"
+                    _autoTestProgress.value = AutoTestProgress(
+                        running = false,
+                        stage = AutoTestStage.FAILED,
+                        message = "请求节点失败"
+                    )
+                    return@launch
+                }
 
-                var workingNodes = selectNodesForAutoTest(nodes.value, config)
+                // 在获取后始终读取新的数据库快照，以避免陈旧的 Flow 缓存
+                // 导致在长时间运行的自动化测试中按 ID 更新失败。
+                val latestSnapshot = nodeDao.getAllNodes().first()
+                var workingNodes = selectNodesForAutoTest(latestSnapshot, config)
                 val initialSelectedCount = workingNodes.size
                 if (workingNodes.isEmpty()) {
                     _error.value = "自动化测试失败：没有可用节点"
@@ -1391,7 +1655,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                     } else {
-                        urlTestAllNodes(workingNodes)
+                        urlTestAllNodesInternal(
+                            targetNodes = workingNodes,
+                            requireGlobalLock = false,
+                            onProgress = { completed, total ->
+                                _autoTestProgress.value = AutoTestProgress(
+                                    running = true,
+                                    stage = AutoTestStage.LATENCY_TEST,
+                                    message = "正在进行 URL Test...",
+                                    completed = completed,
+                                    total = total
+                                )
+                            }
+                        )
                         waitForUrlTestCompletion(startTimeoutMs = 12_000, finishTimeoutMs = 120_000)
                     }
 
@@ -1416,7 +1692,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         nodeDao.updateAutoTestStatus(node.id, false, "LATENCY_FILTERED", System.currentTimeMillis())
                     }
                     latencyFiltered.forEach { node ->
-                        nodeDao.updateAutoTestStatus(node.id, true, "LATENCY_PASSED", System.currentTimeMillis())
+                        val status = if (node.latency > 0) "LATENCY_PASSED" else "LATENCY_SKIPPED"
+                        nodeDao.updateAutoTestStatus(node.id, node.isAvailable, status, System.currentTimeMillis())
                     }
 
                     workingNodes = latencyFiltered
@@ -1475,8 +1752,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         val filtered = workingNodes.filter { node ->
                             val downloadThreshold = config.bandwidthDownloadThresholdMbps.toFloat()
                             val uploadThreshold = config.bandwidthUploadThresholdMbps.toFloat()
-                            val downloadPassed = !config.bandwidthDownloadEnabled || (downloadBandwidthMap[node.id] ?: 0f) >= downloadThreshold
-                            val uploadPassed = !config.bandwidthUploadEnabled || (uploadBandwidthMap[node.id] ?: 0f) >= uploadThreshold
+                            val downloadValue = downloadBandwidthMap[node.id] ?: 0f
+                            val uploadValue = uploadBandwidthMap[node.id] ?: 0f
+                            val downloadMeasured = !config.bandwidthDownloadEnabled || downloadValue > 0f
+                            val uploadMeasured = !config.bandwidthUploadEnabled || uploadValue > 0f
+                            val downloadPassed = !config.bandwidthDownloadEnabled || (downloadMeasured && downloadValue >= downloadThreshold)
+                            val uploadPassed = !config.bandwidthUploadEnabled || (uploadMeasured && uploadValue >= uploadThreshold)
                             downloadPassed && uploadPassed
                         }
                         val removed = workingNodes.filterNot { node -> filtered.any { it.id == node.id } }
@@ -1484,9 +1765,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                             nodeDao.updateAutoTestStatus(node.id, false, "BANDWIDTH_FILTERED", System.currentTimeMillis())
                         }
                         filtered.forEach { node ->
-                            nodeDao.updateAutoTestStatus(node.id, true, "BANDWIDTH_PASSED", System.currentTimeMillis())
+                            nodeDao.updateAutoTestStatus(node.id, node.isAvailable, "BANDWIDTH_PASSED", System.currentTimeMillis())
                         }
                         workingNodes = filtered
+                    }
+                    if (!wifiAllowed || (!config.bandwidthDownloadEnabled && !config.bandwidthUploadEnabled)) {
+                        workingNodes.forEach { node ->
+                            nodeDao.updateAutoTestStatus(node.id, node.isAvailable, "BANDWIDTH_SKIPPED", System.currentTimeMillis())
+                        }
                     }
                 }
 
@@ -1537,11 +1823,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     completed = workingNodes.size,
                     total = initialSelectedCount
                 )
+                val currentPreferMode = preferTestModes.value.firstOrNull { it.id == preferTestSelectedModeId.value }
+                val snapshotPriority = preferPriority ?: currentPreferMode?.defaultPriority ?: BestNodePriority.LATENCY
+                val sortedSnapshot = sortNodesForSnapshot(
+                    nodes = workingNodes,
+                    priority = snapshotPriority,
+                    mode = currentPreferMode
+                )
+                _autoTestResultSnapshot.value = sortedSnapshot.map { it.copy() }
 
                 if (preferPriority != null && workingNodes.isNotEmpty()) {
                     val latestById = nodeDao.getAllNodes().first().associateBy { it.id }
                     val finalCandidates = workingNodes.mapNotNull { latestById[it.id] }.filter { it.isAvailable }
-                    val currentPreferMode = preferTestModes.value.firstOrNull { it.id == preferTestSelectedModeId.value }
                     val bestNode = pickBestNode(finalCandidates, preferPriority, currentPreferMode)
                     if (bestNode != null) {
                         settingsRepository.setSelectedNodeId(bestNode.id)
@@ -1568,6 +1861,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     _isAutoSelecting.value = false
                 }
                 autoTestJob = null
+                GlobalTestExecution.finish()
             }
         }
     }
@@ -1641,9 +1935,141 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             delay(100)
         }
         if (!isTesting.value) {
-            throw IllegalStateException("URL test did not start")
+            throw IllegalStateException("URL test并没有启动")
         }
         waitForCondition(timeoutMs = finishTimeoutMs) { !isTesting.value }
+    }
+
+    private fun launchStartupDefaultTestIfNeeded(showHint: Boolean = false) {
+        viewModelScope.launch {
+            val mode = settingsRepository.startupDefaultTestMode.first()
+            val ready = waitForNodesReadyWithAutoRetry(timeoutMs = AppConfig.NODE_REQUEST_TIMEOUT_MS)
+            if (!ready) return@launch
+            runDefaultStartupTestIfNeeded(mode, showHint)
+        }
+    }
+
+    fun refreshNodesWithDefaultTest() {
+        viewModelScope.launch {
+            if (GlobalTestExecution.isFetching()) {
+                _error.value = GlobalTestExecution.fetchingHint()
+                return@launch
+            }
+            if (_autoTestProgress.value.running || _isTesting.value || GlobalTestExecution.mutex.isLocked) {
+                _error.value = GlobalTestExecution.busyHint()
+                return@launch
+            }
+            val mode = settingsRepository.startupDefaultTestMode.first()
+            val fetchOk = fetchNodesInternal(
+                bypassThrottle = true,
+                runUrlTest = false,
+                fetchingLabel = "请求节点中"
+            )
+            if (!fetchOk) return@launch
+            val ready = waitForNodesReadyWithAutoRetry(timeoutMs = AppConfig.NODE_REQUEST_TIMEOUT_MS)
+            if (!ready) return@launch
+            runDefaultStartupTestIfNeeded(mode, showHint = false)
+        }
+    }
+
+    private suspend fun waitForNodesReadyWithAutoRetry(timeoutMs: Long): Boolean {
+        val firstAttempt = runCatching {
+            waitForCondition(timeoutMs = timeoutMs) { !isLoading.value && nodes.value.isNotEmpty() }
+        }
+        if (firstAttempt.isSuccess) return true
+
+        _error.value = "请求节点超时，已自动再次请求节点..."
+        val retryOk = fetchNodesInternal(
+            bypassThrottle = true,
+            runUrlTest = false,
+            allowWhenFetchingInProgress = true,
+            fetchingLabel = "请求节点中"
+        )
+        if (!retryOk) {
+            _error.value = "请求节点超时，自动重试后仍未完成，请稍后再试"
+            return false
+        }
+
+        val secondAttempt = runCatching {
+            waitForCondition(timeoutMs = timeoutMs) { !isLoading.value && nodes.value.isNotEmpty() }
+        }
+        if (secondAttempt.isSuccess) return true
+
+        _error.value = "请求节点超时，自动重试后仍失败，请稍后再试"
+        return false
+    }
+
+    private suspend fun <T> requestWithAutoRetry(
+        requestName: String,
+        requestBlock: suspend () -> T
+    ): Result<T> {
+        val first = runCatching { requestBlock() }
+        if (first.isSuccess) return Result.success(first.getOrThrow())
+
+        _error.value = "${requestName}请求失败，已自动重试..."
+        val second = runCatching { requestBlock() }
+        if (second.isSuccess) return Result.success(second.getOrThrow())
+
+        _error.value = "${requestName}请求失败，自动重试后仍失败，请稍后再试"
+        return Result.failure(second.exceptionOrNull() ?: first.exceptionOrNull() ?: IllegalStateException("${requestName}请求失败"))
+    }
+
+    private fun runDefaultStartupTestIfNeeded(mode: StartupDefaultTestMode, showHint: Boolean) {
+        if (mode == StartupDefaultTestMode.NONE) return
+        if (_isTesting.value || _autoTestProgress.value.running) return
+        when (mode) {
+            StartupDefaultTestMode.TCPING -> {
+                if (showHint) _error.value = "已按默认设置执行 TCPing 测试"
+                testAllNodes()
+            }
+            StartupDefaultTestMode.URL_TEST -> {
+                if (showHint) _error.value = "已按默认设置执行 URL Test 测试"
+                urlTestAllNodes()
+            }
+            StartupDefaultTestMode.NONE -> Unit
+        }
+    }
+
+    suspend fun fetchNodeIpInfo(node: Node): Result<NodeIpInfo> = withContext(Dispatchers.IO) {
+        val port = pickFreePort()
+        val session = UnlockTestManager.createSession(getApplication(), node, port)
+        val started = session.start()
+        if (!started) return@withContext Result.failure(IllegalStateException("启动节点测试代理失败"))
+
+        try {
+            val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
+            val client = NetworkClient.withUserAgent(OkHttpClient.Builder())
+                .proxy(proxy)
+                .connectTimeout(AppConfig.NODE_IP_INFO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .readTimeout(AppConfig.NODE_IP_INFO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .writeTimeout(AppConfig.NODE_IP_INFO_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build()
+
+            val request = Request.Builder()
+                .url(AppConfig.NODE_IP_INFO_URL)
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) {
+                    return@withContext Result.failure(
+                        IllegalStateException("请求失败: HTTP ${response.code}")
+                    )
+                }
+                val body = response.body?.string().orEmpty()
+                if (body.isBlank()) {
+                    return@withContext Result.failure(IllegalStateException("接口返回为空"))
+                }
+                val parsed = gson.fromJson(body, NodeIpInfo::class.java)
+                    ?: return@withContext Result.failure(IllegalStateException("解析 IP 信息失败"))
+                Result.success(parsed)
+            }
+        } catch (e: Exception) {
+            Log.e(tag, "Fetch node IP info failed for ${node.getDisplayName()}: ${e.message}")
+            Result.failure(e)
+        } finally {
+            session.stop()
+        }
     }
 
     private suspend fun testNodeDownloadBandwidthMbps(node: Node, sizeMb: Int): Float = withContext(Dispatchers.IO) {
@@ -1653,11 +2079,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         try {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-            val client = OkHttpClient.Builder()
+            val builder = NetworkClient.withUserAgent(OkHttpClient.Builder())
                 .proxy(proxy)
                 .connectTimeout(12, TimeUnit.SECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
-                .build()
+            if (AppConfig.AUTO_TEST_BANDWIDTH_DOWNLOAD_TIMEOUT_MS > 0L) {
+                builder.callTimeout(AppConfig.AUTO_TEST_BANDWIDTH_DOWNLOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }
+            val client = builder.build()
 
             val bytes = sizeMb.toLong() * 1_000_000L
             val url = "${AppConfig.SPEED_TEST_DOWNLOAD_URL}?bytes=$bytes&r=${System.currentTimeMillis()}"
@@ -1691,12 +2120,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         try {
             val proxy = Proxy(Proxy.Type.SOCKS, InetSocketAddress("127.0.0.1", port))
-            val client = OkHttpClient.Builder()
+            val builder = NetworkClient.withUserAgent(OkHttpClient.Builder())
                 .proxy(proxy)
                 .connectTimeout(12, TimeUnit.SECONDS)
                 .readTimeout(45, TimeUnit.SECONDS)
                 .writeTimeout(45, TimeUnit.SECONDS)
-                .build()
+            if (AppConfig.AUTO_TEST_BANDWIDTH_UPLOAD_TIMEOUT_MS > 0L) {
+                builder.callTimeout(AppConfig.AUTO_TEST_BANDWIDTH_UPLOAD_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            }
+            val client = builder.build()
 
             val bytes = sizeMb.toLong() * 1_000_000L
             val randomBuffer = ByteArray(8192) { 0x5A.toByte() }
@@ -1807,6 +2239,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         .thenBy { if (mode?.bandwidthEnabled == true && mode.bandwidthDownloadEnabled) it.downloadMbps else 0f }
                         .thenBy { -safeLatency(it) }
                 )
+        }
+    }
+
+    private fun sortNodesForSnapshot(
+        nodes: List<Node>,
+        priority: BestNodePriority,
+        mode: TestPreferMode?
+    ): List<Node> {
+        return when (priority) {
+            BestNodePriority.LATENCY -> nodes.sortedWith(
+                compareBy<Node> { if (it.latency > 0) it.latency else Int.MAX_VALUE }
+                    .thenByDescending { it.downloadMbps }
+                    .thenByDescending { it.uploadMbps }
+            )
+
+            BestNodePriority.DOWNLOAD -> nodes.sortedWith(
+                compareByDescending<Node> { it.downloadMbps }
+                    .thenBy { safeLatency(it) }
+            )
+
+            BestNodePriority.UPLOAD -> nodes.sortedWith(
+                compareByDescending<Node> { it.uploadMbps }
+                    .thenBy { safeLatency(it) }
+            )
+
+            BestNodePriority.UNLOCK_COUNT -> nodes.sortedWith(
+                compareByDescending<Node> { unlockPriorityScore(it, mode) }
+                    .thenByDescending { extractUnlockYesCount(it.unlockSummary) }
+                    .thenByDescending { it.unlockPassed }
+                    .thenByDescending { if (mode?.bandwidthEnabled == true && mode.bandwidthDownloadEnabled) it.downloadMbps else 0f }
+                    .thenBy { safeLatency(it) }
+            )
         }
     }
 

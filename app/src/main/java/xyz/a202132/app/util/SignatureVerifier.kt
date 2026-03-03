@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.Log
 
 /**
- * Native signature verification to prevent tampered APKs from running.
+ * 原生签名验证，防止篡改的 APK 运行
  */
 object SignatureVerifier {
     private const val TAG = "SignatureVerifier"
@@ -18,8 +18,8 @@ object SignatureVerifier {
     }
 
     /**
-     * Verify the APK signature against the expected hash.
-     * If verification fails, the app will crash (native abort).
+     * 验证 APK 签名是否与预期哈希值相符
+     * 如果验证失败，应用程序将崩溃（原生中止）
      */
     @JvmStatic
     external fun verifySignature(context: Context)

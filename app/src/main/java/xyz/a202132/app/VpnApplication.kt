@@ -1,9 +1,17 @@
 package xyz.a202132.app
 
 import android.app.Application
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import xyz.a202132.app.util.RuleManager
 import xyz.a202132.app.util.SignatureVerifier
 
 class VpnApplication : Application() {
+    
+    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     
     override fun onCreate() {
         super.onCreate()
@@ -12,6 +20,15 @@ class VpnApplication : Application() {
         SignatureVerifier.verifySignature(this)
         
         instance = this
+        
+        // 后台更新规则集（不阻塞启动，失败不影响使用）
+        applicationScope.launch(Dispatchers.IO) {
+            try {
+                RuleManager.updateRuleSets(this@VpnApplication)
+            } catch (e: Exception) {
+                Log.w("VpnApplication", "Background rule set update failed", e)
+            }
+        }
     }
     
     companion object {

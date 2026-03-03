@@ -16,15 +16,18 @@
   <a href="#配置说明">配置说明</a> •
   <a href="#api-接口">API 接口</a> •
   <a href="#自定义">自定义</a> •
-  <a href="#构建发布">构建发布</a>
+  <a href="#构建发布">构建发布</a> •
+  <a href="#其他说明">其他说明</a>
 </p>
+
+
 
 
 ---
 
 **免责声明：** 本项目为本人开源作品，与米哈游 (HoYoverse) 无关。本项目不盈利、不接受捐赠。所有涉及的游戏角色名称及设计版权归米哈游所有。
 
-**Disclaimers:** This project is my open-source creation and is related to miHoYo (HoYoverse). This project is non-profit and not for sale. All game character names and design copyrights belong to miHoYo.
+**Disclaimers:** This project is my open-source creation and is not related to miHoYo (HoYoverse). This project is non-profit and not for sale. All game character names and design copyrights belong to miHoYo.
 
 ------
 
@@ -50,16 +53,17 @@
 
 ### 测试与诊断
 
-- 🔧 **三点工具菜单**：主界面右上角“三点”菜单提供 TCPing、URL Test、网速测试、流媒体解锁测试、隐藏超时/不可用节点、网络工具箱等功能
-- 🌐 **URL Test（默认）**：通过启动临时无头 sing-box 实例进行 HTTP 握手延迟测试，无需连接 VPN 即可测试所有节点真实连通性（作为 App 启动和刷新时的默认测试方式）
+- 🔧 **三点工具菜单**：主界面右上角“三点”菜单提供 TCPing、URL Test、网速测试、流媒体解锁测试、节点IP信息、隐藏超时/不可用节点、网络工具箱等功能
+- 🌐 **URL Test 测试**：通过启动临时无头 sing-box 实例进行 HTTP 握手延迟测试，无需连接 VPN 即可测试所有节点真实连通性
 - 🧠 **测试择优面板（全屏横屏）**：升级版自动化测试入口，支持横屏沉浸式配置、更多参数同屏展示、模式化测试与一键择优
 - 🧩 **测试模式系统**：内置 `聊天模式`（URL Test 延迟优先）与 `下载模式`（下行带宽优先，默认 10MB），支持自定义模式保存/删除
-- 🤖 **自动化测试流程（保留原能力）**：支持配置后自动执行“拉节点 → URL Test → 延迟筛选 → 带宽测试 → 带宽筛选 → 解锁测试”，并弹出结果总览与节点详情
+- 🤖 **自动化测试流程**：支持配置后自动执行“拉节点 → 延迟测试 → 延迟筛选 → 带宽测试 → 带宽筛选 → 解锁测试”，并弹出结果总览与节点详情
 - 🎯 **智能择优规则**：支持延迟优先 / 上行优先 / 下行优先 / 解锁情况优先（解锁数或指定网站多选优先）
-- 🎬 **流媒体解锁测试**：集成 UnlockTests，可逐节点测试国外主流网站解锁情况并展示可滚动结果明细
+- 🎬 **流媒体解锁测试**：集成 UnlockTests，可逐节点测试国外主流网站解锁情况并展示可滚动结果明细，支持“当前节点”一键勾选与“随机测试节点数”勾选
 - ⚡ **Cloudflare 网速测试**：集成 Cloudflare Speed Test，支持下载/上传测速，实时显示速率
 - 📡 **TCPing 测试**：直接 TCP 连接测试节点可达性和延迟
-- 🗑️ **清理不可用节点**：一键隐藏超时/不可用节点（UI 过滤，不删除数据库数据）
+- 🔍 **节点出口 IP 信息查询**：在三点菜单中可基于“当前选择节点”查询出口 IP 详细信息（地区、ASN、欺诈评分、是否住宅/原生IP等），无需先连接 VPN
+- 🗑️ **清理不合格节点**：一键隐藏超时/不可用/不达标节点（UI 过滤，不删除数据库数据）
 - 🛠️ **网络工具箱**：内置 10 种常用网络检测工具（出口检测、IP查询、WebRTC泄漏、DNS泄漏、速度测试等），一键跳转浏览器使用
 
 ### 界面与体验
@@ -89,7 +93,7 @@
 | **UI 框架** | Jetpack Compose + Material 3 |
 | **架构模式** | MVVM (ViewModel + StateFlow) |
 | **网络请求** | Retrofit2 + OkHttp3 |
-| **本地存储** | Room Database + DataStore |
+| **本地存储** | Room Database (SQLCipher 加密) + DataStore |
 | **VPN 核心** | [sing-box](https://github.com/SagerNet/sing-box) (libbox.aar) |
 | **并发处理** | Kotlin Coroutines |
 
@@ -101,7 +105,7 @@
 
 | 工具 | 版本要求 |
 |------|---------| 
-| **Android Studio** | Koala | 2024.1.1 或更高 |
+| **Android Studio** | Koala 2024.1.1 或更高 |
 | **JDK** | 17 |
 | **Kotlin** | 1.9.21 |
 | **Gradle** | 8.7+ |
@@ -130,6 +134,8 @@
 >
 > - 从 [sing-box Releases](https://github.com/SagerNet/sing-box/releases) 下载预编译版本
 > - 或参考 [libbox 构建指南](https://sing-box.sagernet.org/installation/build-from-source/#build-libbox-for-android) 自行编译
+
+项目还依赖 [SQLCipher for Android](https://github.com/niceyun/sqlcipher-android)（`net.zetetic:sqlcipher-android:4.13.0`）用于本地数据库加密，Gradle 会自动下载，无需手动配置。
 
 ---
 
@@ -166,6 +172,14 @@ object AppConfig {
     const val NOTICE_URL = "https://your-server.com/api/notice"
     // 官网地址
     const val WEBSITE_URL = "https://your-server.com"
+
+    // API 请求超时（毫秒）
+    const val NODE_REQUEST_TIMEOUT_MS = 25000L    // 节点请求超时
+    const val NOTICE_REQUEST_TIMEOUT_MS = 25000L  // 公告请求超时
+    const val UPDATE_REQUEST_TIMEOUT_MS = 25000L  // 更新请求超时
+
+    // 联系方式
+    const val FEEDBACK_EMAIL = ""  // 反馈邮箱，留空则不跳转
     // 反馈链接（GitHub Issues）
     const val FEEDBACK_URL = "https://github.com/your-username/your-repo/issues"
     // 项目源码地址（留空则隐藏关于页相关按钮）
@@ -174,17 +188,31 @@ object AppConfig {
     // 延迟测试并发数
     const val TCPING_CONCURRENCY = 16
     const val URL_TEST_CONCURRENCY = 10
+    const val AUTO_TEST_UNLOCK_CONCURRENCY = 3 // 流媒体解锁测试并发建议2~3
 
     // 延迟测试 (TCPing & URL Test)
-    const val TCPING_TEST_URL = "https://www.google.com/generate_204"
     const val TCPING_TEST_TIMEOUT = 3000L // 超时默认3秒
     
     const val URL_TEST_URL = "https://www.google.com/generate_204"
     const val URL_TEST_TIMEOUT = 5000L // 超时默认5秒
 
+    // VPN 核心参数
+    const val VPN_MTU = 9000
+    const val VPN_DNS_PRIMARY = "8.8.8.8"
+    const val VPN_DNS_SECONDARY = "8.8.4.4"
+    const val VPN_DNS_CHINA = "223.5.5.5"        // 国内 DNS（智能分流模式使用）
+    val HTTP_USER_AGENT: String  // 运行时 getter，自动跟随版本号
+        get() = "FireflyVPN/${BuildConfig.VERSION_NAME}"
+
+    // 节点出口 IP 信息查询
+    const val NODE_IP_INFO_URL = "https://my.ippure.com/v1/info"
+    const val NODE_IP_INFO_TIMEOUT_MS = 12000L
+
     // 速度测试 (Cloudflare)
     const val SPEED_TEST_DOWNLOAD_URL = "https://speed.cloudflare.com/__down"
     const val SPEED_TEST_UPLOAD_URL = "https://speed.cloudflare.com/__up"
+    const val AUTO_TEST_BANDWIDTH_DOWNLOAD_TIMEOUT_MS = 25000L // 单次下载带宽测试超时
+    const val AUTO_TEST_BANDWIDTH_UPLOAD_TIMEOUT_MS = 30000L   // 单次上传带宽测试超时
 }
 ```
 
@@ -261,6 +289,7 @@ app/src/main/java/xyz/a202132/app/
 │   │   ├── AutoTestResultDialog.kt  # 自动化测试结果与详情弹窗
 │   │   ├── Dialogs.kt           # 通用对话框（公告、更新等）
 │   │   ├── NetworkToolboxDialog.kt  # 网络工具箱弹窗
+│   │   ├── NodeIpInfoDialog.kt      # 节点出口 IP 信息弹窗
 │   │   ├── SpeedTestDialog.kt       # 网速测试弹窗
 │   │   ├── UnlockTestDialog.kt      # 流媒体解锁测试弹窗
 │   │   └── UserAgreementDialog.kt   # 用户协议弹窗
@@ -273,6 +302,7 @@ app/src/main/java/xyz/a202132/app/
 │       └── Type.kt              # 字体排版
 ├── util/
 │   ├── CryptoUtils.kt           # AES 加解密工具
+│   ├── DatabasePassphraseManager.kt # SQLCipher 数据库密钥管理（Android Keystore）
 │   ├── NetworkUtils.kt          # 网络状态检测工具
 │   ├── RuleManager.kt           # 智能分流规则管理
 │   ├── SignatureVerifier.kt     # APK 签名验证（JNI 桥接）
@@ -280,6 +310,7 @@ app/src/main/java/xyz/a202132/app/
 │   └── UnlockTestsRunner.kt      # UnlockTests 二进制执行器
 └── viewmodel/
     ├── AutoTestState.kt          # 自动化测试状态模型
+    ├── GlobalTestExecution.kt    # 全局测试互斥锁
     ├── MainViewModel.kt          # 主界面 ViewModel
     ├── PerAppProxyViewModel.kt   # 分应用代理 ViewModel
     └── UnlockTestViewModel.kt    # 流媒体解锁测试 ViewModel
@@ -288,15 +319,18 @@ app/src/main/java/xyz/a202132/app/
 ### 资源文件结构
 
 ```
+app/libs/libbox.aar               # sing-box 核心库
 app/src/main/
+├── assets/
+│   └── rule-sets/                # 智能分流规则集
+│       ├── geoip-cn.srs
+│       └── geosite-cn.srs
 ├── cpp/
 │   ├── CMakeLists.txt            # NDK 构建配置
 │   └── native-lib.cpp            # Native 层（AES 密钥 + 签名校验）
 ├── jniLibs/
 │   ├── arm64-v8a/libut.so        # UnlockTests (ARM64)
 │   └── armeabi-v7a/libut.so      # UnlockTests (ARMv7)
-├── libs/
-│   └── libbox.aar                # sing-box 核心库
 ├── res/
 │   ├── drawable/                 # 图标和图片资源
 │   ├── mipmap-*/                 # 应用图标
@@ -323,8 +357,9 @@ app/src/main/
 | **TCPing** | 直接 TCP 连接测试节点可达性和延迟 |
 | **URL Test** | 通过 ClashAPI 发起 HTTP 握手延迟测试，结果更准确 (默认/推荐) |
 | **网速测试** | 使用 Cloudflare 节点进行真实宽带测速 |
-| **隐藏超时/不可用** | 一键隐藏超时/不可用节点（UI 过滤） |
-| **流媒体解锁测试** | 调用 UnlockTests 逐节点测试解锁能力 |
+| **隐藏不合格节点** | 一键隐藏超时/不可用/不达标节点（UI 过滤） |
+| **流媒体解锁测试** | 调用 UnlockTests 逐节点测试解锁能力，支持“当前节点”一键勾选与随机节点数勾选 |
+| **节点 IP 信息** | 查询当前选择节点的出口 IP 详情（地区、ASN、风控评分等，选中即可，无需连接） |
 | **网络工具箱** | 打开内置网络工具站点集合 |
 
 **URL Test 工作原理**：
@@ -384,12 +419,12 @@ const val NETWORK_TOOLS_JSON = """
 **自动化测试链路（按启用项执行）**：
 
 1. 拉取节点
-2. URL Test（真实连通延迟）
+2. 延迟测试（可选TCPing或URL Test）
 3. 按延迟阈值筛选（可选）
 4. 逐节点带宽测试（下载/上传，支持下载测试流量大小 1/10/25/50MB）
 5. 按带宽阈值筛选（可选）
 6. 逐节点流媒体解锁测试（UnlockTests，可选）
-7. 弹出“自动化测试结果”弹窗（支持关键词搜索、节点详情、复制结果、自动连接最优）
+7. 弹出“自动化测试结果”弹窗（支持关键词搜索、节点详情、自动连接最优、手动选择节点连接）
 
 **择优规则（模式默认规则 + 手动选择）**：
 
@@ -410,8 +445,6 @@ const val NETWORK_TOOLS_JSON = """
 
 - 侧边栏 → `测试择优面板`
 - 首页中间按钮（弹模式选择后执行）
-
-> ⚠️ 开启“启动自动执行当前模式测试”后，APP 启动会优先执行当前模式测试流程，不再先跑默认 URL Test，避免重复测试。
 
 ---
 
@@ -517,19 +550,30 @@ IPv6 路由功能允许用户控制 VPN 对 IPv6 网络的处理方式。
 - `autoTestStatus`：自动化阶段状态（如 `LATENCY_PASSED` / `BANDWIDTH_FILTERED` / `UNLOCK_PASSED`）
 - `autoTestedAt`：自动化测试时间戳
 
-`SettingsRepository` 新增自动化测试配置项：
+`SettingsRepository` 自动化测试配置项：
 
 - `autoTestEnabled`
 - `autoTestFilterUnavailable`
+- `autoTestLatencyEnabled`
+- `autoTestLatencyMode`（URL Test / TCPing）
 - `autoTestLatencyThresholdMs`
 - `autoTestBandwidthEnabled`
-- `autoTestBandwidthThresholdMbps`
+- `autoTestBandwidthDownloadEnabled`
+- `autoTestBandwidthUploadEnabled`
+- `autoTestBandwidthDownloadThresholdMbps`
+- `autoTestBandwidthUploadThresholdMbps`
 - `autoTestBandwidthWifiOnly`
-- `autoTestBandwidthSizeMb`
+- `autoTestBandwidthDownloadSizeMb`
+- `autoTestBandwidthUploadSizeMb`
 - `autoTestUnlockEnabled`
+- `autoTestByRegion`
 - `autoTestNodeLimit`
+- `preferTestModes`（测试偏好模式列表，JSON）
+- `preferTestSelectedModeId`
+- `startupDefaultTestMode`
+- `startupDefaultTestChoiceDone`
 
-> ⚠️ 当前数据库使用 `fallbackToDestructiveMigration()`。当 Room 版本升级（如 `version 1 -> 2`）时，会清空本地节点数据后重建。
+> ⚠️ 当前数据库使用 SQLCipher 加密存储（version 2），并配置了 `fallbackToDestructiveMigration()`。当 Room 版本升级时，会清空本地节点数据后重建。旧版明文数据库会在升级时自动检测并删除重建。
 
 ---
 
@@ -559,7 +603,7 @@ configure<com.github.megatronking.stringfog.plugin.StringFogExtension> {
 
 ### 2. NDK 密钥存储
 
-AES 加密密钥存储在 Native (C++) 层，通过 XOR 混淆防止静态分析。
+AES 加密密钥存储在 Native (C++) 层，通过双数组 XOR + 运行时噪声混淆防止静态分析。
 
 **密钥文件**：`app/src/main/cpp/native-lib.cpp`
 
@@ -567,27 +611,33 @@ AES 加密密钥存储在 Native (C++) 层，通过 XOR 混淆防止静态分析
 
 1. 确定你的 16 位密钥（AES-128 要求恰好 16 字节），例如：`MySecretKey12345`
 
-2. 使用以下 Python 脚本生成混淆后的字节数组：
+2. 使用以下 Python 脚本生成混淆后的双数组：
 
 ```python
-key = "MySecretKey12345"  # 必须 16 字符
-SEED = 0x33
+import os
 
+key = "MySecretKey12345"  # 必须 16 字符
 assert len(key) == 16
 
-encrypted = []
-for i, c in enumerate(key):
-    encrypted.append(ord(c) ^ (SEED + i))
+kXor = 0xA7  # XOR 常量，可自定义
+partB = list(os.urandom(16))  # 随机生成 partB
 
-print("static const uint8_t encoded[16] = {")
-for i, v in enumerate(encrypted):
-    end = "," if i < 15 else ""
-    print(f"    0x{v:02X}{end}")
-print("};")
-print(f"constexpr uint8_t seed = 0x{SEED:02X};")
+# 计算 partA: 运行时 decoded[i] = partA[i] ^ partB[i] ^ kXor
+partA = [ord(c) ^ partB[i] ^ kXor for i, c in enumerate(key)]
+
+def fmt(arr, size=8):
+    lines = []
+    for i in range(0, len(arr), size):
+        chunk = ", ".join(f"0x{v:02X}" for v in arr[i:i+size])
+        lines.append(f"        {chunk}" + ("," if i + size < len(arr) else ""))
+    return "\n".join(lines)
+
+print(f"static const uint8_t partA[16] = {{\n{fmt(partA)}\n}};")
+print(f"static const uint8_t partB[16] = {{\n{fmt(partB)}\n}};")
+print(f"constexpr uint8_t kXor = 0x{kXor:02X};")
 ```
 
-3. 将输出替换到 `native-lib.cpp` 中的 `encrypted_key` 数组
+3. 将输出的 `partA`、`partB`、`kXor` 替换到 `native-lib.cpp` 中 `nativeGetNativeKey` 函数对应位置
 
 4. **同步修改服务端加密密钥**
 
@@ -613,40 +663,44 @@ print(f"constexpr uint8_t seed = 0x{SEED:02X};")
 明文节点链接 → AES-GCM加密(生成随机IV) → 拼接(IV + 密文 + AuthTag) → Base64编码 → 返回给APP
 ```
 
-#### Node.js 加密示例
+#### Python 加密示例
 
-```javascript
-const crypto = require('crypto');
+```shell
+pip install cryptography // 安装依赖
+```
 
-const SECRET_KEY = 'MySecretKey12345';  // 16 字节密钥，与 APP 一致
+```python
+import os
+import base64
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-function encrypt(plaintext) {
-    // 生成随机 12 字节 IV
-    const iv = crypto.randomBytes(12);
-    
-    // 创建 cipher
-    const cipher = crypto.createCipheriv('aes-128-gcm', Buffer.from(SECRET_KEY), iv);
-    
-    // 加密
-    let encrypted = cipher.update(plaintext, 'utf8');
-    encrypted = Buffer.concat([encrypted, cipher.final()]);
-    
-    // 获取 AuthTag (16 字节)
-    const authTag = cipher.getAuthTag();
-    
-    // 拼接: IV (12) + 密文 + AuthTag (16)
-    const combined = Buffer.concat([iv, encrypted, authTag]);
-    
-    // 返回 Base64
-    return combined.toString('base64');
-}
+# 密钥必须是 16 字节 (对应 AES-128)
+SECRET_KEY = b'MySecretKey12345' 
 
-// 使用示例
-const nodes = `hysteria2://uuid@server:port?sni=example.com#节点名称
-vless://uuid@server:port?security=tls#另一个节点`;
+def encrypt(plaintext):
+    # 1. 初始化 AES-128-GCM 实例
+    aesgcm = AESGCM(SECRET_KEY)
+    
+    # 2. 生成随机 12 字节 IV
+    iv = os.urandom(12)
+    
+    # 3. 加密
+    # cryptography 库的 encrypt 方法会自动生成 16 字节的 authTag 
+    # 并将其附加在密文后面：返回值为 ciphertext + authTag
+    ciphertext_with_tag = aesgcm.encrypt(iv, plaintext.encode('utf-8'), None)
+    
+    # 4. 拼接: IV (12) + 密文 + AuthTag (16)
+    combined = iv + ciphertext_with_tag
+    
+    # 5. 返回 Base64 编码的字符串
+    return base64.b64encode(combined).decode('utf-8')
 
-const encrypted = encrypt(nodes);
-// 将 encrypted 作为 API 响应返回
+# --- 使用示例 ---
+nodes = """hysteria2://uuid@server:port?sni=example.com#节点名称
+vless://uuid@server:port?security=tls#另一个节点"""
+
+encrypted_data = encrypt(nodes)
+print(encrypted_data)
 ```
 
 ---
@@ -666,17 +720,42 @@ APP 启动时在 Native 层校验 APK 签名。如果签名不匹配（说明被
 & "C:\Program Files\Android\Android Studio\jbr\bin\keytool.exe" -list -v -keystore your-release-key.jks -alias your-alias
 ```
 
-2. 复制输出中的 `SHA256:` 值（格式如 `95:CA:C5:8A:...`）
+2. 复制输出中的 `SHA256:` 值（格式如 `95:CA:C5:8A:...`），去掉冒号得到 64 位十六进制字符串
 
-3. 去掉冒号，转成大写，替换 `native-lib.cpp` 中的 `EXPECTED_SIGNATURE`：
+3. 使用以下 Python 脚本生成混淆后的双数组：
 
-```cpp
-static const char* EXPECTED_SIGNATURE = "95CAC58A...";
+```python
+import os
+
+# 将 SHA-256 输出的冒号去掉，转成大写
+sha256_hex = "95CAC58A..."  # 替换为你的完整 64 位十六进制字符串
+sha256_bytes = bytes.fromhex(sha256_hex)
+assert len(sha256_bytes) == 32
+
+kXor = 0x5D  # XOR 常量，可自定义
+partB = list(os.urandom(32))  # 随机生成 partB
+
+# 计算 partA: 运行时 expected[i] = partA[i] ^ partB[i] ^ kXor
+partA = [sha256_bytes[i] ^ partB[i] ^ kXor for i in range(32)]
+
+def fmt(arr, size=8):
+    lines = []
+    for i in range(0, len(arr), size):
+        chunk = ", ".join(f"0x{v:02X}" for v in arr[i:i+size])
+        lines.append(f"            {chunk}" + ("," if i + size < len(arr) else ""))
+    return "\n".join(lines)
+
+print(f"static const uint8_t partA[32] = {{\n{fmt(partA)}\n}};")
+print(f"static const uint8_t partB[32] = {{\n{fmt(partB)}\n}};")
+print(f"constexpr uint8_t kXor = 0x{kXor:02X};")
 ```
 
-4. 重新 Clean → Rebuild 项目
+4. 将输出的 `partA`、`partB`、`kXor` 替换到 `native-lib.cpp` 中 `isExpectedSignature` 函数对应位置
+
+5. 重新 Clean → Rebuild 项目
 
 > ⚠️ **注意**：每次更换签名证书后，都需要更新此值，否则 APP 将无法启动。
+
 
 ---
 
@@ -743,6 +822,25 @@ Release 版本默认移除所有 `android.util.Log` 调用（包括 `Log.d`、`L
 
 ---
 
+### 7. 本地数据库加密 (SQLCipher)
+
+本地节点数据库使用 [SQLCipher for Android](https://github.com/niceyun/sqlcipher-android) 进行加密存储，防止 Root 环境下节点数据被直接读取。
+
+**工作原理**：
+
+1. 首次启动时，`DatabasePassphraseManager` 生成随机 256-bit 数据库密钥
+2. 密钥通过 Android Keystore 的 AES-GCM 加密后存储在 SharedPreferences 中
+3. Room 通过 `SupportOpenHelperFactory` 使用该密钥打开加密数据库
+4. 旧版明文数据库会被自动检测并删除重建（通过读取文件头判断是否为 SQLite 明文格式）
+
+**核心文件**：
+- `DatabasePassphraseManager.kt` — 密钥生成、加密存储、解密读取
+- `AppDatabase.kt` — 加密数据库初始化 + 旧数据库迁移
+
+> 💡 密钥由 Android Keystore 硬件保护，即使设备被 Root，攻击者也无法直接获取原始密钥。
+
+---
+
 ## API 接口（简单部署方式可以参考apis目录里面说明）
 
 ### 1. 节点订阅接口
@@ -753,7 +851,7 @@ Release 版本默认移除所有 `android.util.Log` 调用（包括 `Log.d`、`L
 
 **支持的协议**:
 - `vless://` - VLESS
-- `vmess://` - VMess (Base64 JSON)
+- `vmess://` - VMess 
 - `trojan://` - Trojan
 - `hysteria2://` 或 `hy2://` - Hysteria2
 - `anytls://` - AnyTLS
@@ -1058,8 +1156,8 @@ android {
 **文件**:**`app/build.gradle.kts`**:
 
 ```kotlin
-versionCode = 11
-versionName = "1.10.0"
+versionCode = 15
+versionName = "1.14.0"
 ```
 
 版本号规范建议：
@@ -1155,6 +1253,76 @@ target_link_options(native-lib PRIVATE "-Wl,-z,max-page-size=16384")
 
 ---
 
+## 其他说明
+
+### 智能分流实现
+
+当前智能分流已基于 `rule_set` + `.srs` 文件：
+
+- `SingBoxConfigGenerator` 在 SMART 模式引用 `geosite-cn` / `geoip-cn`
+- `route.rule_set` 使用本地 `geosite-cn.srs` / `geoip-cn.srs`
+- APP 启动后后台更新规则集：`VpnApplication` → `RuleManager.updateRuleSets()`
+- VPN 启动/重启前确保规则集存在：`BoxVpnService` → `RuleManager.ensureRuleSets()`
+- `ensureRuleSets()` 缺失时会从 assets 兜底拷贝
+
+---
+
+### 测试与请求节点互斥
+
+项目已实现"全局测试互斥 + 拉节点状态互斥"：
+
+- 拉节点中禁止关键测试启动
+- 测试进行中禁止拉节点
+- 统一提示文案已细化为阶段型提示（如：TCPing/URL Test/解锁/测试择优进行中，请稍后；请求节点中，请稍后）
+
+---
+
+### 请求容错与自动重试
+
+节点请求、公告通知、版本更新三类网络请求均具备统一的容错策略：
+
+- 第一次请求失败/超时 → 自动重试一次（Toast 提示"请求失败，已自动重试..."）
+- 第二次仍失败：
+  - **节点请求（备用模式）**→ 关闭备用节点 → 清除缓存 → 恢复默认订阅
+  - **节点请求（默认模式）**→ Toast 显示错误信息
+  - **公告/更新请求** → Toast进行提示，不影响 APP 使用
+
+超时时间统一在 `AppConfig.kt` 配置：
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `NODE_REQUEST_TIMEOUT_MS` | 25000 | 节点请求超时（毫秒） |
+| `NOTICE_REQUEST_TIMEOUT_MS` | 25000 | 公告请求超时（毫秒） |
+| `UPDATE_REQUEST_TIMEOUT_MS` | 25000 | 更新请求超时（毫秒） |
+
+---
+
+### 测试择优面板补充
+
+- 自动化测试结果使用快照（`autoTestResultSnapshot`），避免后续刷新节点导致结果视图被"旧/新数据混合"污染
+- "自动连接最优"按快照和当前优选规则执行（延迟优先/下行优先/解锁优先）
+
+---
+
+### 稳定性与下载行为
+
+- 请求节点等待超时路径已改为可恢复处理（超时提示 + 自动重试），避免因等待阶段超时直接崩溃
+- `DownloadManager` 对 HTTP 416 采用"非递归一次自动恢复策略"：
+  - 先清理临时文件并全量重试一次
+  - 仍失败再提示用户重试
+  - 避免递归导致潜在栈风险
+
+---
+
+### 安全说明（务必阅读）
+
+- 订阅解析日志已减少敏感信息输出，不再记录完整节点链接原文
+- Native 层密钥与签名目标值已做运行时重组，降低"直接明文检索"命中概率
+- 但这类客户端静态保护仅能提升逆向成本，不能替代真正的密钥托管与服务端校验策略
+
+---
+
+
 ## 常见问题
 
 ### Q: URL Test 全部显示超时
@@ -1164,14 +1332,9 @@ target_link_options(native-lib PRIVATE "-Wl,-z,max-page-size=16384")
 2. URL Test 需要网络连接，确保 WiFi 或移动数据正常
 3. 检查 Logcat 中 `SingBoxCoreLog` 标签的日志，排查 sing-box 核心错误
 
-### Q: 为什么开启自动化测试后，启动时没有先跑默认 URL Test？
+### Q: 为什么在“测试择优面板”点击“自动连接最优”后没有立即选中节点？
 **A**:
-这是预期行为。启用自动化测试后，启动会直接进入“自动化流程”（其中包含 URL Test 阶段），避免重复测试。
-
-### Q: 为什么点击“自动连接最优”后没有立即选中节点？
-**A**:
-这是新的保护逻辑（更安全也更准确）✅  
-如果当前模式还没有完成对应类型的测试（例如你选了“下行优先”，但还没跑下行测速），系统会**先保存规则**并提示你执行测试，而不会使用无关结果或默认 URL Test 历史数据去误选节点。
+这是新的保护逻辑。如果当前模式还没有完成对应类型的测试（例如你选了“下行优先”，但还没跑下行测速），系统会**先保存规则**并提示你执行测试，而不会使用无关结果或默认 URL Test 历史数据去误选节点。
 
 ### Q: 流媒体解锁测试使用什么组件？
 **A**:
@@ -1205,3 +1368,4 @@ target_link_options(native-lib PRIVATE "-Wl,-z,max-page-size=16384")
 - [UnlockTests](https://github.com/oneclickvirt/UnlockTests) - 流媒体解锁测试
 - [JetBrains/Kotlin](https://github.com/JetBrains/kotlin) - Kotlin 语言
 - [Google/Jetpack Compose](https://developer.android.com/jetpack/compose) - UI 框架
+

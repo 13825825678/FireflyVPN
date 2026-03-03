@@ -10,6 +10,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,6 +22,8 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import xyz.a202132.app.AppConfig
 import xyz.a202132.app.data.local.AppDatabase
+import xyz.a202132.app.data.model.Node
+import xyz.a202132.app.data.repository.SettingsRepository
 import xyz.a202132.app.network.UnlockTestManager
 import xyz.a202132.app.util.UnlockTestsRunner
 import java.net.ServerSocket
@@ -53,10 +56,24 @@ class UnlockTestViewModel(application: Application) : AndroidViewModel(applicati
     private val resultTag = "UnlockTestResult"
     private val projectUrl = "https://github.com/oneclickvirt/UnlockTests"
     private val nodeDao = AppDatabase.getInstance(application).nodeDao()
+    private val settingsRepository = SettingsRepository(application)
+    private val visibleNodeIds = MutableStateFlow<Set<String>?>(null)
 
-    val nodes = nodeDao.getAllNodes()
-        .map { list -> list.sortedBy { it.sortOrder } }
+    val nodes = combine(
+        nodeDao.getAllNodes(),
+        visibleNodeIds
+    ) { list, visibleIds ->
+        val filtered = if (visibleIds == null) {
+            list
+        } else {
+            list.filter { it.id in visibleIds }
+        }
+        filtered.sortedBy { it.sortOrder }
+    }
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
+    val currentSelectedNodeId = settingsRepository.selectedNodeId
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     private val _selectedNodeIds = MutableStateFlow<Set<String>>(emptySet())
     val selectedNodeIds = _selectedNodeIds.asStateFlow()
@@ -80,6 +97,13 @@ class UnlockTestViewModel(application: Application) : AndroidViewModel(applicati
         _error.value = null
     }
 
+    fun updateVisibleNodes(visibleNodes: List<Node>) {
+        val ids = visibleNodes.map { it.id }.toSet()
+        visibleNodeIds.value = ids
+        _selectedNodeIds.update { selected -> selected.intersect(ids) }
+        _results.update { list -> list.filter { it.nodeId in ids } }
+    }
+
     fun setAllSelected(selected: Boolean) {
         _selectedNodeIds.value = if (selected) {
             nodes.value.map { it.id }.toSet()
@@ -94,12 +118,52 @@ class UnlockTestViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    fun selectCurrentNodeOnly() {
+        val currentId = currentSelectedNodeId.value
+        if (currentId.isNullOrBlank()) {
+            _error.value = "请先在主页选择节点"
+            return
+        }
+        val exists = nodes.value.any { it.id == currentId }
+        if (!exists) {
+            _error.value = "当前节点不在可测列表中"
+            return
+        }
+        _selectedNodeIds.value = setOf(currentId)
+    }
+
+    fun selectRandomNodes(count: Int) {
+        val allNodes = nodes.value
+        if (allNodes.isEmpty()) {
+            _selectedNodeIds.value = emptySet()
+            return
+        }
+        val target = count.coerceIn(0, allNodes.size)
+        if (target == 0) {
+            _selectedNodeIds.value = emptySet()
+            return
+        }
+        _selectedNodeIds.value = allNodes
+            .shuffled()
+            .take(target)
+            .map { it.id }
+            .toSet()
+    }
+
     fun startTests() {
         if (_isRunning.value) return
 
         val selectedNodes = nodes.value.filter { _selectedNodeIds.value.contains(it.id) }
         if (selectedNodes.isEmpty()) {
             _error.value = "请先选择要测试的节点"
+            return
+        }
+        if (GlobalTestExecution.isFetching()) {
+            _error.value = GlobalTestExecution.fetchingHint()
+            return
+        }
+        if (!GlobalTestExecution.tryStart("解锁测试")) {
+            _error.value = GlobalTestExecution.busyHint()
             return
         }
 
@@ -200,6 +264,7 @@ class UnlockTestViewModel(application: Application) : AndroidViewModel(applicati
                 _isRunning.value = false
                 runningJob = null
                 Log.i(tag, "Unlock tests finished")
+                GlobalTestExecution.finish()
             }
         }
     }

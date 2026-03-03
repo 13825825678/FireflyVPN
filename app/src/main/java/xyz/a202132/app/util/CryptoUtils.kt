@@ -64,7 +64,7 @@ object CryptoUtils {
             // 5. 转成字符串
             String(decryptedBytes, Charsets.UTF_8)
         } catch (e: Exception) {
-            Log.e(TAG, "Decryption failed: ${e.message}", e)
+            Log.w(TAG, "Decryption failed: ${e.javaClass.simpleName}")
             "Error: ${e.message}"
         }
     }

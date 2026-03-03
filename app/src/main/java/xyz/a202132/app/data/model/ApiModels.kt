@@ -54,6 +54,44 @@ data class BackupNodeInfo(
 )
 
 /**
+ * 节点出口 IP 信息
+ */
+data class NodeIpInfo(
+    @SerializedName("ip")
+    val ip: String = "",
+    @SerializedName("asn")
+    val asn: Int? = null,
+    @SerializedName("asOrganization")
+    val asOrganization: String? = null,
+    @SerializedName("country")
+    val country: String? = null,
+    @SerializedName("countryCode")
+    val countryCode: String? = null,
+    @SerializedName("region")
+    val region: String? = null,
+    @SerializedName("regionCode")
+    val regionCode: String? = null,
+    @SerializedName("city")
+    val city: String? = null,
+    @SerializedName("timezone")
+    val timezone: String? = null,
+    @SerializedName("longitude")
+    val longitude: String? = null,
+    @SerializedName("latitude")
+    val latitude: String? = null,
+    @SerializedName("postalCode")
+    val postalCode: String? = null,
+    @SerializedName("fraudScore")
+    val fraudScore: Int? = null,
+    @SerializedName("isResidential")
+    val isResidential: Boolean? = null,
+    @SerializedName("isBroadcast")
+    val isBroadcast: Boolean? = null,
+    @SerializedName("userAgent")
+    val userAgent: String? = null
+)
+
+/**
  * VPN连接状态
  */
 enum class VpnState {

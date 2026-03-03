@@ -6,12 +6,22 @@ import okhttp3.ResponseBody
 import retrofit2.Converter
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import xyz.a202132.app.AppConfig
 import java.lang.reflect.Type
 import java.util.concurrent.TimeUnit
 
 object NetworkClient {
+
+    fun withUserAgent(builder: OkHttpClient.Builder): OkHttpClient.Builder {
+        return builder.addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("User-Agent", AppConfig.HTTP_USER_AGENT)
+                .build()
+            chain.proceed(request)
+        }
+    }
     
-    private val okHttpClient = OkHttpClient.Builder()
+    private val okHttpClient = withUserAgent(OkHttpClient.Builder())
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
@@ -46,7 +56,7 @@ object NetworkClient {
     val apiService: ApiService = retrofit.create(ApiService::class.java)
     
     // OkHttpClient for latency testing (shorter timeout)
-    val latencyTestClient = OkHttpClient.Builder()
+    val latencyTestClient = withUserAgent(OkHttpClient.Builder())
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .writeTimeout(5, TimeUnit.SECONDS)

@@ -14,7 +14,7 @@ import java.io.FileOutputStream
 import java.io.InputStream
 
 /**
- * Download Status Enum
+ * 下载状态枚举
  */
 enum class DownloadStatus {
     IDLE,
@@ -26,7 +26,7 @@ enum class DownloadStatus {
 }
 
 /**
- * Download State Data Class
+ * 下载状态数据类
  */
 data class DownloadState(
     val status: DownloadStatus = DownloadStatus.IDLE,
@@ -41,7 +41,7 @@ data class DownloadState(
 
 object DownloadManager {
     private const val TAG = "DownloadManager"
-    private val client = OkHttpClient()
+    private val client = NetworkClient.withUserAgent(OkHttpClient.Builder()).build()
     
     // StateFlow for UI observation
     private val _downloadState = MutableStateFlow(DownloadState())
@@ -51,20 +51,16 @@ object DownloadManager {
     private var targetFile: File? = null
     
     // Control flags
+    @Volatile
     private var isPaused = false
+    @Volatile
     private var isCancelled = false
     
     // 连续失败计数器（排除无网络错误）
     private var consecutiveFailures = 0
     
     /**
-     * Start or Resume download
-     */
-    /**
-     * Start or Resume download
-     */
-    /**
-     * Start or Resume download
+     * 开始或继续下载
      */
     suspend fun startDownload(url: String, context: Context, versionName: String) {
         withContext(Dispatchers.IO) {
@@ -125,37 +121,52 @@ object DownloadManager {
                 
                 isPaused = false
                 isCancelled = false
-                
-                val downloadedLength = if (targetFile!!.exists()) targetFile!!.length() else 0L
-                val requestBuilder = Request.Builder().url(url)
-                
-                if (downloadedLength > 0) {
-                    Log.d(TAG, "Resuming download from bytes=$downloadedLength")
-                    requestBuilder.header("Range", "bytes=$downloadedLength-")
+                var downloadedLength = if (targetFile!!.exists()) targetFile!!.length() else 0L
+                var resumed = downloadedLength > 0
+
+                fun buildRequest(length: Long): Request {
+                    val builder = Request.Builder().url(url)
+                    if (length > 0) {
+                        Log.d(TAG, "Resuming download from bytes=$length")
+                        builder.header("Range", "bytes=$length-")
+                    }
+                    return builder.build()
                 }
-                
-                val response = client.newCall(requestBuilder.build()).execute()
-                
+
+                var response = client.newCall(buildRequest(downloadedLength)).execute()
+
+                // Non-recursive one-shot fallback for HTTP 416: clear temp and retry full download once.
+                if (!response.isSuccessful && response.code == 416 && resumed) {
+                    response.close()
+                    if (targetFile!!.exists() && !targetFile!!.delete()) {
+                        Log.w(TAG, "Failed to delete stale temp file on 416: ${targetFile!!.absolutePath}")
+                    }
+                    downloadedLength = 0L
+                    resumed = false
+                    response = client.newCall(buildRequest(downloadedLength)).execute()
+                }
+
                 if (!response.isSuccessful) {
-                    // If range not satisfiable (e.g. file complete or server incompatible), error or delete and retry
-                     if (response.code == 416) {
-                        targetFile!!.delete()
-                        // Retry recursively once
-                        startDownload(url, context, versionName)
+                    if (response.code == 416) {
+                        downloadUrl = ""
+                        _downloadState.value = _downloadState.value.copy(
+                            status = DownloadStatus.ERROR,
+                            error = "服务器拒绝续传，请重试"
+                        )
                         return@withContext
                     }
                     throw Exception("Download failed: ${response.code}")
                 }
-                
+
                 val body = response.body ?: throw Exception("Response body is null")
-                val totalLength = body.contentLength() + downloadedLength
+                val totalLength = if (resumed) body.contentLength() + downloadedLength else body.contentLength()
                 
                 var inputStream: InputStream? = null
                 var outputStream: FileOutputStream? = null
                 
                 try {
                     inputStream = body.byteStream()
-                    outputStream = FileOutputStream(targetFile!!, true) // Append mode
+                    outputStream = FileOutputStream(targetFile!!, resumed) // Append mode when resume succeeds
                     
                     val buffer = ByteArray(8192)
                     var bytesRead: Int

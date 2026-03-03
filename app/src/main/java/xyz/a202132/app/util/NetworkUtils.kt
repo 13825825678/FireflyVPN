@@ -8,7 +8,7 @@ import android.os.Build
 object NetworkUtils {
     
     /**
-     * Check if network is available (WiFi or Cellular)
+     * 检查网络是否可用（WiFi 或移动网络）
      */
     fun isNetworkAvailable(context: Context): Boolean {
         val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager

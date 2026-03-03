@@ -117,13 +117,12 @@ fun NodeListDialog(
 
                         // 刷新按钮
                         IconButton(
-                            onClick = onRefresh,
-                            enabled = !isTesting
+                            onClick = onRefresh
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "刷新",
-                                tint = if (isTesting) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                         
@@ -205,6 +204,7 @@ fun NodeListDialog(
                                 NodeListItem(
                                     node = node,
                                     isSelected = node.id == selectedNodeId,
+                                    isTesting = isTesting,
                                     onClick = { onNodeSelected(node) }
                                 )
                             }
@@ -220,6 +220,7 @@ fun NodeListDialog(
 private fun NodeListItem(
     node: Node,
     isSelected: Boolean,
+    isTesting: Boolean,
     onClick: () -> Unit
 ) {
     val backgroundColor = if (isSelected) Primary.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant
@@ -277,7 +278,7 @@ private fun NodeListItem(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // 延迟
-                LatencyBadge(node = node)
+                LatencyBadge(node = node, isTesting = isTesting)
                 
                 // 选中标记
                 if (isSelected) {
@@ -301,7 +302,7 @@ private fun NodeListItem(
 }
 
 @Composable
-fun LatencyBadge(node: Node) {
+fun LatencyBadge(node: Node, isTesting: Boolean = false) {
     val latencyColor = when (node.getLatencyLevel()) {
         LatencyLevel.GOOD -> LatencyGood
         LatencyLevel.MEDIUM -> LatencyMedium
@@ -313,7 +314,7 @@ fun LatencyBadge(node: Node) {
         shape = RoundedCornerShape(6.dp)
     ) {
         Text(
-            text = node.getLatencyText(),
+            text = if (isTesting && node.latency == -1) "测试中" else node.getLatencyText(),
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             color = latencyColor,

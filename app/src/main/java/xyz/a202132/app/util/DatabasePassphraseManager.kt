@@ -28,7 +28,7 @@ object DatabasePassphraseManager {
             try {
                 return unwrapPassphrase(wrapped)
             } catch (_: Exception) {
-                // Keystore or wrapped blob may become invalid after system restore/reset.
+                // 系统还原/重置后，密钥库或封装的数据块可能会失效
                 prefs.edit().remove(PREF_WRAPPED_DB_KEY).apply()
                 deleteKeyIfExists()
             }

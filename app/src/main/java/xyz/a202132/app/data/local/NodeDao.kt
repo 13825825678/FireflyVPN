@@ -6,13 +6,13 @@ import xyz.a202132.app.data.model.Node
 
 @Dao
 interface NodeDao {
-    @Query("SELECT * FROM nodes WHERE isAvailable = 1 ORDER BY latency ASC")
+    @Query("SELECT * FROM nodes WHERE isAvailable = 1 ORDER BY CASE WHEN latency < 0 THEN 1 ELSE 0 END, latency ASC")
     fun getAllAvailableNodes(): Flow<List<Node>>
     
     @Query("SELECT * FROM nodes ORDER BY sortOrder ASC, latency ASC")
     fun getAllNodes(): Flow<List<Node>>
     
-    @Query("SELECT * FROM nodes WHERE isAvailable = 1 ORDER BY latency ASC LIMIT 1")
+    @Query("SELECT * FROM nodes WHERE isAvailable = 1 ORDER BY CASE WHEN latency < 0 THEN 1 ELSE 0 END, latency ASC LIMIT 1")
     suspend fun getBestNode(): Node?
     
     @Query("SELECT * FROM nodes WHERE id = :id")

@@ -21,7 +21,7 @@ data class SpeedTestResult(
 
 class SpeedTestService {
 
-    private val client = OkHttpClient.Builder()
+    private val client = NetworkClient.withUserAgent(OkHttpClient.Builder())
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)

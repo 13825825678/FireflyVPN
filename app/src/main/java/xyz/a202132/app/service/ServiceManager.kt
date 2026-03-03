@@ -167,9 +167,9 @@ object ServiceManager {
     fun formatSpeed(bytesPerSecond: Long): String {
         return when {
             bytesPerSecond < 1024 -> "${bytesPerSecond} B/s"
-            bytesPerSecond < 1024 * 1024 -> "${bytesPerSecond / 1024} KB/s"
-            bytesPerSecond < 1024 * 1024 * 1024 -> "${bytesPerSecond / (1024 * 1024)} MB/s"
-            else -> "${bytesPerSecond / (1024 * 1024 * 1024)} GB/s"
+            bytesPerSecond < 1024 * 1024 -> "%.1f KB/s".format(bytesPerSecond / 1024.0)
+            bytesPerSecond < 1024 * 1024 * 1024 -> "%.1f MB/s".format(bytesPerSecond / (1024.0 * 1024))
+            else -> "%.2f GB/s".format(bytesPerSecond / (1024.0 * 1024 * 1024))
         }
     }
     

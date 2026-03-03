@@ -184,6 +184,7 @@ fun TestPreferPanelDialog(
     var nodeLimitInput by remember(autoTestNodeLimit) { mutableStateOf(autoTestNodeLimit.toString()) }
     var showPriorityDialog by remember { mutableStateOf(false) }
     var showUnlockPriorityDialog by remember { mutableStateOf(false) }
+    var showDeleteConfirmDialog by remember { mutableStateOf(false) }
     var pendingPriority by remember(currentMode?.defaultPriority, availablePriorityOptions) {
         mutableStateOf(
             currentMode?.defaultPriority?.takeIf { it in availablePriorityOptions }
@@ -309,7 +310,7 @@ fun TestPreferPanelDialog(
                                 Text("保存模式")
                             }
                             Button(
-                                onClick = onDeleteCurrentPreferTestMode,
+                                onClick = { showDeleteConfirmDialog = true },
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                             ) {
@@ -329,7 +330,7 @@ fun TestPreferPanelDialog(
                         SectionTitle("基础筛选")
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = autoTestFilterUnavailable, onCheckedChange = onSetAutoTestFilterUnavailable)
-                            Text("按阈值移除未达标 / 不可用节点")
+                            Text("按阈值隐藏不合格节点")
                         }
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = autoTestLatencyEnabled, onCheckedChange = onSetAutoTestLatencyEnabled)
@@ -465,15 +466,15 @@ fun TestPreferPanelDialog(
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
                         ) {
                             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (autoTestProgress.running) {
-                                        "当前阶段：${autoTestProgress.stage}\n${autoTestProgress.message}"
-                                    } else {
-                                        "点击“开始测试”按当前面板设置执行；完成后可选择移除未达标或自动连接最优节点。"
-                                    },
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                                    Text(
+                                        text = if (autoTestProgress.running) {
+                                            "当前阶段：${autoTestProgress.stage}\n${autoTestProgress.message}"
+                                        } else {
+                                            "点击“开始测试”按当前面板设置执行；完成后可选择隐藏不合格节点或自动连接最优节点。"
+                                        },
+                                        fontSize = 13.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 if (autoTestProgress.total > 0) {
                                     Text(
                                         text = "进度：${autoTestProgress.completed}/${autoTestProgress.total}",
@@ -511,7 +512,7 @@ fun TestPreferPanelDialog(
                             ) {
                                 Icon(Icons.Outlined.Speed, contentDescription = null)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("移除未达标")
+                                Text("隐藏不合格节点")
                             }
                         }
 
@@ -694,6 +695,35 @@ fun TestPreferPanelDialog(
                     modifier = Modifier.defaultMinSize(minHeight = 34.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
                 ) { Text("取消") }
+            }
+        )
+    }
+
+    if (showDeleteConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirmDialog = false },
+            title = { Text("确认删除当前模式") },
+            text = { Text("删除后无法找回，是否继续删除？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConfirmDialog = false
+                        onDeleteCurrentPreferTestMode()
+                    },
+                    modifier = Modifier.defaultMinSize(minHeight = 34.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                ) {
+                    Text("确认删除")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteConfirmDialog = false },
+                    modifier = Modifier.defaultMinSize(minHeight = 34.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)
+                ) {
+                    Text("取消")
+                }
             }
         )
     }

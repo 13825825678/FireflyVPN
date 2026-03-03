@@ -30,38 +30,49 @@ data class UnlockPrioritySite(
  */
 object AppConfig {
     // API URLs
-    const val SUBSCRIPTION_URL = "https://your-server.com/api/nodes"
-    const val UPDATE_URL = "https://your-server.com/api/update"
-    const val NOTICE_URL = "https://your-server.com/api/notice"
-    const val WEBSITE_URL = "https://your-website.com"
+    const val SUBSCRIPTION_URL = "https://your-server.com/api//nodes" // 订阅URL
+    const val UPDATE_URL = "https://your-server.com/api//update" // 检查更新URL
+    const val NOTICE_URL = "https://your-server.com/api//notice" // 公告通知URL
+    const val WEBSITE_URL = "https://your-website.com" // 官网网站
+
+    // API timeout (milliseconds) for retry-controlled requests
+    const val NODE_REQUEST_TIMEOUT_MS = 25000L // 节点请求超时（毫秒）
+    const val NOTICE_REQUEST_TIMEOUT_MS = 25000L // 公告请求超时（毫秒）
+    const val UPDATE_REQUEST_TIMEOUT_MS = 25000L // 更新请求超时（毫秒）
     
     // Contact
-    const val FEEDBACK_EMAIL = "support@your-domain.com"
+    const val FEEDBACK_EMAIL = "support@your-domain.com" // 反馈邮箱，留空则不跳转
     const val FEEDBACK_URL = "https://github.com/your-username/your-repo/issues"  // 反馈链接，留空则不跳转
     const val GITHUB_URL = "https://github.com/your-username/your-repo"  // 项目源码地址，留空则隐藏关于页相关按钮
     
     // Latency Test
     // 常用http://cp.cloudflare.com/generate_204或https://www.google.com/generate_204
-    const val TCPING_TEST_URL = "https://www.google.com/generate_204"
-    const val TCPING_TEST_TIMEOUT = 3000L
+    const val TCPING_TEST_TIMEOUT = 3000L // TCPing 超时（毫秒）
     
-    const val URL_TEST_URL = "https://www.google.com/generate_204"
-    const val URL_TEST_TIMEOUT = 5000L
+    const val URL_TEST_URL = "https://www.google.com/generate_204" // URL Test测试URL
+    const val URL_TEST_TIMEOUT = 5000L // URL Test 超时（毫秒）
     
     // Concurrency
-    const val TCPING_CONCURRENCY = 16
-    const val URL_TEST_CONCURRENCY = 10
-    const val AUTO_TEST_UNLOCK_CONCURRENCY = 3 // 流媒体解锁测试并发建议2~3
+    const val TCPING_CONCURRENCY = 16 // TCPing并发数
+    const val URL_TEST_CONCURRENCY = 10 // URL Test并发数
+    const val AUTO_TEST_UNLOCK_CONCURRENCY = 3 // 流媒体解锁测试并发数
     
     // VPN
     const val VPN_MTU = 9000
     const val VPN_DNS_PRIMARY = "8.8.8.8"
     const val VPN_DNS_SECONDARY = "8.8.4.4"
-    const val VPN_DNS_CHINA = "223.5.5.5"
-    
+    const val VPN_DNS_CHINA = "223.5.5.5" // 国内 DNS（智能分流模式使用）
+    val HTTP_USER_AGENT: String
+        get() = "FireflyVPN/${xyz.a202132.app.BuildConfig.VERSION_NAME}"
+
+
     // Notification
     const val NOTIFICATION_CHANNEL_ID = "vpn_service"
     const val NOTIFICATION_ID = 1
+
+    // 节点IP信息
+    const val NODE_IP_INFO_URL = "https://my.ippure.com/v1/info"
+    const val NODE_IP_INFO_TIMEOUT_MS = 12000L // 单次节点IP信息查询超时（毫秒）
 
     // Network Toolbox - 网络工具箱
     const val NETWORK_TOOLS_JSON = """
@@ -82,6 +93,8 @@ object AppConfig {
     // Speed Test - Cloudflare 网速测试
     const val SPEED_TEST_DOWNLOAD_URL = "https://speed.cloudflare.com/__down"
     const val SPEED_TEST_UPLOAD_URL = "https://speed.cloudflare.com/__up"
+    const val AUTO_TEST_BANDWIDTH_DOWNLOAD_TIMEOUT_MS = 25000L // 单次下载带宽测试超时（毫秒），设为0则无限制
+    const val AUTO_TEST_BANDWIDTH_UPLOAD_TIMEOUT_MS = 30000L // 单次上传带宽测试超时（毫秒），设为0则无限制
     const val SPEED_TEST_JSON = """
 [
   {"label": "1MB", "bytes": 1000000},
@@ -136,6 +149,7 @@ object AppConfig {
         return sizes
     }
 
+    // 流媒体解锁大概测试的网站名（不懂的话不要改）
     val UNLOCK_PRIORITY_PRESET_SITES: List<UnlockPrioritySite> = listOf(
         UnlockPrioritySite("apple", "Apple", listOf("Apple")),
         UnlockPrioritySite("bing_search", "BingSearch", listOf("BingSearch")),

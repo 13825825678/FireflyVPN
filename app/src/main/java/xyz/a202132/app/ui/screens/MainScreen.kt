@@ -1,6 +1,8 @@
 package xyz.a202132.app.ui.screens
 
 import android.widget.Toast
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,7 +35,9 @@ import xyz.a202132.app.ui.theme.*
 import xyz.a202132.app.viewmodel.AutoTestStage
 import xyz.a202132.app.viewmodel.BestNodePriority
 import xyz.a202132.app.viewmodel.MainViewModel
+import xyz.a202132.app.viewmodel.StartupDefaultTestMode
 import xyz.a202132.app.viewmodel.TestPreferMode
+import xyz.a202132.app.viewmodel.UnlockPriorityMode
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,7 +50,7 @@ fun MainScreen(
     val scope = rememberCoroutineScope()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     
-    // Collect states
+    // Collect状态
     val nodes by viewModel.nodes.collectAsState()
     val currentNode by viewModel.currentNode.collectAsState()
     val selectedNodeId by viewModel.selectedNodeId.collectAsState()
@@ -64,16 +68,22 @@ fun MainScreen(
     val infoDialogMessage by viewModel.infoDialogMessage.collectAsState()
     val isAutoSelecting by viewModel.isAutoSelecting.collectAsState()
     val isUserAgreementAccepted by viewModel.isUserAgreementAccepted.collectAsState()
+    val showStartupDefaultTestChoiceDialog by viewModel.showStartupDefaultTestChoiceDialog.collectAsState()
     
-    // UI States
+    // UI状态
     var showSpeedTestDialog by remember { mutableStateOf(false) }
     var showUnlockTestDialog by remember { mutableStateOf(false) }
     var showNetworkToolboxDialog by remember { mutableStateOf(false) }
+    var showNodeIpInfoDialog by remember { mutableStateOf(false) }
+    var showNodeIpInfoActionDialog by remember { mutableStateOf(false) }
+    var nodeForIpInfo by remember { mutableStateOf<Node?>(null) }
     var showAutoTestResultDialog by remember { mutableStateOf(false) }
     var nodeAutoTestDetail by remember { mutableStateOf<Node?>(null) }
     var autoTestWasRunning by remember { mutableStateOf(false) }
     var showQuickModePicker by remember { mutableStateOf(false) }
     var showTestPreferPanelPage by remember { mutableStateOf(false) }
+    var showTcpingActionDialog by remember { mutableStateOf(false) }
+    var showUrlTestActionDialog by remember { mutableStateOf(false) }
     
     // 流量统计
     val uploadSpeed by viewModel.uploadSpeed.collectAsState()
@@ -108,11 +118,13 @@ fun MainScreen(
     val autoTestByRegion by viewModel.autoTestByRegion.collectAsState()
     val autoTestNodeLimit by viewModel.autoTestNodeLimit.collectAsState()
     val autoTestProgress by viewModel.autoTestProgress.collectAsState()
+    val autoTestResultSnapshot by viewModel.autoTestResultSnapshot.collectAsState()
     val preferTestModes by viewModel.preferTestModes.collectAsState()
     val preferTestSelectedModeId by viewModel.preferTestSelectedModeId.collectAsState()
+    val nodeIpInfoTestOnVpnStart by viewModel.nodeIpInfoTestOnVpnStart.collectAsState()
     // val showBackupFailedDialog by viewModel.showBackupFailedDialog.collectAsState() // Removed
     
-    // Show error toast
+    // 显示错误Toast
     LaunchedEffect(error) {
         error?.let { errorMessage ->
             Toast.makeText(context, errorMessage, Toast.LENGTH_SHORT).show()
@@ -134,6 +146,21 @@ fun MainScreen(
             showAutoTestResultDialog = true
         }
         autoTestWasRunning = autoTestProgress.running
+    }
+
+    var lastVpnState by remember { mutableStateOf(vpnState) }
+    LaunchedEffect(vpnState, nodeIpInfoTestOnVpnStart) {
+        val justConnected = lastVpnState != VpnState.CONNECTED && vpnState == VpnState.CONNECTED
+        if (justConnected && nodeIpInfoTestOnVpnStart) {
+            val selectedNode = currentNode
+            if (selectedNode == null) {
+                Toast.makeText(context, "当前无已选节点，无法执行节点IP信息测试", Toast.LENGTH_SHORT).show()
+            } else {
+                nodeForIpInfo = selectedNode
+                showNodeIpInfoDialog = true
+            }
+        }
+        lastVpnState = vpnState
     }
 
     // Drawer
@@ -193,7 +220,7 @@ fun MainScreen(
                     onSaveCurrentPreferTestMode = { viewModel.saveCurrentPreferTestMode(it) },
                     onDeleteCurrentPreferTestMode = { viewModel.deleteCurrentPreferTestMode() },
                     onHideUnqualifiedAutoTestNodes = { viewModel.hideUnqualifiedAutoTestNodes() },
-                    onSelectBestNodeByPriority = { priority, connect -> viewModel.selectBestNodeByPriority(priority, connect) },
+                    onSelectBestNodeByPriority = { priority, connect -> viewModel.selectBestNodeByPriorityFromSnapshot(priority, connect) },
                     onUpdateCurrentPreferModePriority = { viewModel.updateCurrentPreferModePriority(it) },
                     onStartAutomatedTest = { viewModel.startAutomatedTest() },
                     onCancelAutomatedTest = { viewModel.cancelAutomatedTest() },
@@ -242,14 +269,21 @@ fun MainScreen(
                                     text = { Text("\uD83D\uDD0C TCPing") },
                                     onClick = {
                                         showToolsMenu = false
-                                        viewModel.showNodeListForTest("tcping")
+                                        showTcpingActionDialog = true
                                     }
                                 )
                                 DropdownMenuItem(
                                     text = { Text("\uD83C\uDF10 URL Test") },
                                     onClick = {
                                         showToolsMenu = false
-                                        viewModel.showNodeListForTest("urltest")
+                                        showUrlTestActionDialog = true
+                                    }
+                                )
+                                DropdownMenuItem(
+                                    text = { Text("\uD83D\uDCE1 节点IP信息") },
+                                    onClick = {
+                                        showToolsMenu = false
+                                        showNodeIpInfoActionDialog = true
                                     }
                                 )
                                 DropdownMenuItem(
@@ -260,7 +294,7 @@ fun MainScreen(
                                     }
                                 )
                                 DropdownMenuItem(
-                                    text = { Text("\uD83E\uDDF9 隐藏超时节点") },
+                                    text = { Text("\uD83E\uDDF9 隐藏不合格节点") },
                                     onClick = {
                                         showToolsMenu = false
                                         viewModel.cleanUnavailableNodes()
@@ -413,22 +447,24 @@ fun MainScreen(
             isTesting = isTesting,
             testingLabel = testingLabel,
             onNodeSelected = { node -> viewModel.selectNode(node) },
-            onRefresh = { viewModel.fetchNodes() },
+            onRefresh = { viewModel.refreshNodesWithDefaultTest() },
             onDismiss = { viewModel.hideNodeList() }
         )
     }
 
     if (showAutoTestResultDialog) {
-        val qualifiedNodes = nodes.filter { it.autoTestedAt > 0 && it.isAvailable }
         val currentPreferMode = preferTestModes.firstOrNull { it.id == preferTestSelectedModeId }
+        val qualifiedNodes = autoTestResultSnapshot
         val currentPriority = currentPreferMode?.defaultPriority ?: BestNodePriority.LATENCY
+        val autoConnectLabel = "自动连接最优（${priorityDisplayLabel(currentPriority, currentPreferMode)}）"
         AutoTestResultDialog(
             nodes = qualifiedNodes,
             onDismiss = { showAutoTestResultDialog = false },
             onNodeClick = { node -> nodeAutoTestDetail = node },
+            autoConnectLabel = autoConnectLabel,
             onAutoConnectBest = {
                 onStartVpn {
-                    viewModel.selectBestNodeByPriority(currentPriority, true)
+                    viewModel.selectBestNodeByPriorityFromSnapshot(currentPriority, true)
                 }
             }
         )
@@ -455,6 +491,77 @@ fun MainScreen(
             onConfirm = { modeId ->
                 showQuickModePicker = false
                 onStartVpn { viewModel.startPreferModeAutoSelectAndConnect(modeId) }
+            }
+        )
+    }
+
+    if (showTcpingActionDialog) {
+        TestActionDialog(
+            title = "TCPing",
+            onDismiss = { showTcpingActionDialog = false },
+            onExecute = {
+                showTcpingActionDialog = false
+                viewModel.showNodeListForTest("tcping")
+            },
+            onSetDefault = {
+                showTcpingActionDialog = false
+                viewModel.setStartupDefaultTestMode(StartupDefaultTestMode.TCPING)
+                Toast.makeText(context, "APP启动将自动执行TCPing测试", Toast.LENGTH_SHORT).show()
+            },
+            onDisableDefault = {
+                showTcpingActionDialog = false
+                viewModel.clearStartupDefaultTestMode()
+                Toast.makeText(context, "APP启动默认测试已关闭", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showUrlTestActionDialog) {
+        TestActionDialog(
+            title = "URL Test",
+            onDismiss = { showUrlTestActionDialog = false },
+            onExecute = {
+                showUrlTestActionDialog = false
+                viewModel.showNodeListForTest("urltest")
+            },
+            onSetDefault = {
+                showUrlTestActionDialog = false
+                viewModel.setStartupDefaultTestMode(StartupDefaultTestMode.URL_TEST)
+                Toast.makeText(context, "APP启动将自动执行URL Test测试", Toast.LENGTH_SHORT).show()
+            },
+            onDisableDefault = {
+                showUrlTestActionDialog = false
+                viewModel.clearStartupDefaultTestMode()
+                Toast.makeText(context, "APP启动默认测试已关闭", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+
+    if (showNodeIpInfoActionDialog) {
+        TestActionDialog(
+            title = "节点IP信息",
+            setDefaultLabel = "开启VPN时默认测试",
+            disableDefaultLabel = "开启VPN时关闭测试",
+            onDismiss = { showNodeIpInfoActionDialog = false },
+            onExecute = {
+                showNodeIpInfoActionDialog = false
+                val selectedNode = currentNode
+                if (selectedNode == null) {
+                    Toast.makeText(context, "请先选择节点", Toast.LENGTH_SHORT).show()
+                } else {
+                    nodeForIpInfo = selectedNode
+                    showNodeIpInfoDialog = true
+                }
+            },
+            onSetDefault = {
+                showNodeIpInfoActionDialog = false
+                viewModel.setNodeIpInfoTestOnVpnStart(true)
+                Toast.makeText(context, "开启VPN时将自动执行节点IP信息测试", Toast.LENGTH_SHORT).show()
+            },
+            onDisableDefault = {
+                showNodeIpInfoActionDialog = false
+                viewModel.setNodeIpInfoTestOnVpnStart(false)
+                Toast.makeText(context, "已关闭开启VPN时节点IP信息自动测试", Toast.LENGTH_SHORT).show()
             }
         )
     }
@@ -503,9 +610,9 @@ fun MainScreen(
             onHideUnqualifiedAutoTestNodes = { viewModel.hideUnqualifiedAutoTestNodes() },
             onSelectBestNodeByPriority = { priority, connect ->
                 if (connect) {
-                    onStartVpn { viewModel.selectBestNodeByPriority(priority, true) }
+                    onStartVpn { viewModel.selectBestNodeByPriorityFromSnapshot(priority, true) }
                 } else {
-                    viewModel.selectBestNodeByPriority(priority, false)
+                    viewModel.selectBestNodeByPriorityFromSnapshot(priority, false)
                 }
             },
             onUpdateCurrentPreferModePriority = { viewModel.updateCurrentPreferModePriority(it) },
@@ -556,11 +663,27 @@ fun MainScreen(
     }
 
     if (showUnlockTestDialog) {
-        UnlockTestDialog(onDismiss = { showUnlockTestDialog = false })
+        UnlockTestDialog(
+            visibleNodes = nodes,
+            onDismiss = { showUnlockTestDialog = false }
+        )
     }
 
     if (showNetworkToolboxDialog) {
         NetworkToolboxDialog(onDismiss = { showNetworkToolboxDialog = false })
+    }
+
+    if (showNodeIpInfoDialog) {
+        nodeForIpInfo?.let { node ->
+            NodeIpInfoDialog(
+                node = node,
+                onDismiss = {
+                    showNodeIpInfoDialog = false
+                    nodeForIpInfo = null
+                },
+                fetchIpInfo = { targetNode -> viewModel.fetchNodeIpInfo(targetNode) }
+            )
+        }
     }
     
     // 加载弹窗
@@ -722,6 +845,24 @@ fun MainScreen(
             onDisagree = { (context as? android.app.Activity)?.finish() }
         )
     }
+
+    if (showStartupDefaultTestChoiceDialog && isUserAgreementAccepted) {
+        StartupDefaultTestChoiceDialog(
+            onDismiss = { viewModel.dismissStartupDefaultTestChoiceDialog() },
+            onSelectTcping = {
+                viewModel.confirmStartupDefaultTestChoice(StartupDefaultTestMode.TCPING)
+                Toast.makeText(context, "已设置APP启动默认执行TCPing测试", Toast.LENGTH_SHORT).show()
+            },
+            onSelectUrlTest = {
+                viewModel.confirmStartupDefaultTestChoice(StartupDefaultTestMode.URL_TEST)
+                Toast.makeText(context, "已设置APP启动默认执行URL Test测试", Toast.LENGTH_SHORT).show()
+            },
+            onSkip = {
+                viewModel.confirmStartupDefaultTestChoice(StartupDefaultTestMode.NONE)
+                Toast.makeText(context, "已跳过启动默认测试设置", Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
 }
 
 @Composable
@@ -749,43 +890,51 @@ private fun QuickModePickerDialog(
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                modes.forEach { mode ->
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { localSelectedId = mode.id },
-                        shape = MaterialTheme.shapes.medium,
-                        color = if (localSelectedId == mode.id) {
-                            MaterialTheme.colorScheme.primaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                        }
-                    ) {
-                        Row(
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 320.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    modes.forEach { mode ->
+                        Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                                .clickable { localSelectedId = mode.id },
+                            shape = MaterialTheme.shapes.medium,
+                            color = if (localSelectedId == mode.id) {
+                                MaterialTheme.colorScheme.primaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            }
                         ) {
-                            Text(
-                                text = mode.name,
-                                color = if (localSelectedId == mode.id) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                }
-                            )
-                            if (mode.builtIn) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 Text(
-                                    text = "内置",
-                                    fontSize = 11.sp,
+                                    text = mode.name,
                                     color = if (localSelectedId == mode.id) {
                                         MaterialTheme.colorScheme.onPrimaryContainer
                                     } else {
-                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                        MaterialTheme.colorScheme.onSurface
                                     }
                                 )
+                                if (mode.builtIn) {
+                                    Text(
+                                        text = "内置",
+                                        fontSize = 11.sp,
+                                        color = if (localSelectedId == mode.id) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                    )
+                                }
                             }
                         }
                     }
@@ -803,5 +952,82 @@ private fun QuickModePickerDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         }
+    )
+}
+
+private fun priorityDisplayLabel(priority: BestNodePriority, mode: TestPreferMode?): String {
+    return when (priority) {
+        BestNodePriority.LATENCY -> "延迟优先"
+        BestNodePriority.UPLOAD -> "上行优先"
+        BestNodePriority.DOWNLOAD -> "下行优先"
+        BestNodePriority.UNLOCK_COUNT -> when (mode?.unlockPriorityMode ?: UnlockPriorityMode.COUNT) {
+            UnlockPriorityMode.COUNT -> "按解锁数优选"
+            UnlockPriorityMode.TARGET_SITES -> "按指定网站优选"
+        }
+    }
+}
+
+@Composable
+private fun TestActionDialog(
+    title: String,
+    onDismiss: () -> Unit,
+    onExecute: () -> Unit,
+    onSetDefault: () -> Unit,
+    onDisableDefault: () -> Unit,
+    setDefaultLabel: String = "APP启动默认执行",
+    disableDefaultLabel: String = "APP启动默认关闭"
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onExecute, modifier = Modifier.fillMaxWidth()) {
+                    Text("执行测试")
+                }
+                OutlinedButton(onClick = onSetDefault, modifier = Modifier.fillMaxWidth()) {
+                    Text(setDefaultLabel)
+                }
+                OutlinedButton(onClick = onDisableDefault, modifier = Modifier.fillMaxWidth()) {
+                    Text(disableDefaultLabel)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        }
+    )
+}
+
+@Composable
+private fun StartupDefaultTestChoiceDialog(
+    onDismiss: () -> Unit,
+    onSelectTcping: () -> Unit,
+    onSelectUrlTest: () -> Unit,
+    onSkip: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择启动默认测试") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "APP 启动默认只拉取节点。你可以选择默认执行一种测试，也可以跳过。",
+                    fontSize = 13.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                OutlinedButton(onClick = onSelectTcping, modifier = Modifier.fillMaxWidth()) {
+                    Text("默认执行 TCPing")
+                }
+                OutlinedButton(onClick = onSelectUrlTest, modifier = Modifier.fillMaxWidth()) {
+                    Text("默认执行 URL Test")
+                }
+                TextButton(onClick = onSkip, modifier = Modifier.fillMaxWidth()) {
+                    Text("跳过")
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {}
     )
 }

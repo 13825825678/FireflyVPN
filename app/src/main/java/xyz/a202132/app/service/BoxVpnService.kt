@@ -16,7 +16,7 @@ import xyz.a202132.app.MainActivity
 import xyz.a202132.app.R
 import xyz.a202132.app.data.model.ProxyMode
 import xyz.a202132.app.util.SingBoxConfigGenerator
-// RuleSetManager removed
+import xyz.a202132.app.util.RuleManager
 import java.io.File
 import java.lang.reflect.Method
 import kotlinx.coroutines.flow.first
@@ -172,7 +172,10 @@ class BoxVpnService : VpnService() {
                 
                 Log.d(TAG, "Generating config with ${allNodes.size} nodes, selected: $selectedNodeId, bypassLan: $bypassLan, ipv6Mode: $ipv6Mode")
 
-                // 3. 生成sing-box配置
+                // 3. 确保规则集文件存在（从 assets 拷贝兜底）
+                RuleManager.ensureRuleSets(application)
+
+                // 4. 生成sing-box配置
                 val config = configGenerator.generateConfig(allNodes, selectedNodeId, proxyMode, bypassLan, ipv6Mode)
                 deleteLegacyConfigFile()
                 logConfigForDebug(config)
@@ -717,6 +720,9 @@ class BoxVpnService : VpnService() {
                     } catch (e: Exception) {
                         null
                     }
+                    
+                    // 确保规则集文件存在
+                    RuleManager.ensureRuleSets(application)
                     
                     val config = configGenerator.generateConfig(allNodes, selectedNodeId, proxyMode, bypassLan, ipv6Mode)
                     deleteLegacyConfigFile()

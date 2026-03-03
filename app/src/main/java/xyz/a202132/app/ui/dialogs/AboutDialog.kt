@@ -83,7 +83,7 @@ fun AboutDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // App Name
+                // App名字
                 Text(
                     text = "FireflyVPN",
                     fontSize = 24.sp,
@@ -93,7 +93,7 @@ fun AboutDialog(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // Tagline
+                // 标语
                 Text(
                     text = "流萤加速器",
                     fontSize = 14.sp,
@@ -102,7 +102,7 @@ fun AboutDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Description
+                // 描述
                 Text(
                     text = "一款基于 sing-box 核心，支持多种代理协议和智能分流的 Android VPN 客户端。",
                     fontSize = 14.sp,
@@ -117,7 +117,7 @@ fun AboutDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Disclaimer CN
+                // 免责声明
                 Text(
                     text = "免责声明",
                     fontSize = 13.sp,
@@ -138,7 +138,7 @@ fun AboutDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Disclaimer EN
+                // 免责声明
                 Text(
                     text = "Disclaimers",
                     fontSize = 13.sp,
@@ -163,7 +163,7 @@ fun AboutDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Version - clickable to releases (only if GitHub URL is set)
+                // 版本 - 可点击查看发布版本（仅当设置了 GitHub URL 时）
                 if (releasesUrl.isNotBlank()) {
                     Surface(
                         modifier = Modifier
@@ -205,7 +205,7 @@ fun AboutDialog(
                     Spacer(modifier = Modifier.height(10.dp))
                 }
 
-                // Source Code - clickable to GitHub (only if GitHub URL is set)
+                // 源代码 - 可点击跳转至 GitHub（仅当已设置 GitHub URL 时）
                 if (githubUrl.isNotBlank()) {
                     Surface(
                         modifier = Modifier

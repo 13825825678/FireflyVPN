@@ -61,7 +61,7 @@ fun SpeedTestDialog(
     
     // Test State
     var currentSpeed by remember { mutableFloatStateOf(0f) }
-    var progress by remember { mutableFloatStateOf(0f) } // 0.0 - 1.0 (per test)
+    var progress by remember { mutableFloatStateOf(0f) } // 0.0 - 1.0 (每项测试)
     var currentOperation by remember { mutableStateOf("") } // "正在下载..."
     
     // Results
@@ -88,9 +88,9 @@ fun SpeedTestDialog(
                         progress = 0f
                     }
                     val result = service.startDownloadTest(selectedSize.bytes) { speed, prog ->
-                        // Switch to main thread for UI updates? Compose state is thread-safe for reading but modifying from BG thread is okay for SnapshotState? 
-                        // Actually better to use withContext or keep it minimal.
-                        // SnapshotState can be updated from any thread, but recomposition happens on UI thread.
+                        // UI 更新时是否应该切换到主线程？Compose 状态的读取是线程安全的，但从后台线程修改 SnapshotState 可以吗？
+                        // 实际上最好使用 withContext 或保持代码简洁。
+                        // SnapshotState 可以从任何线程更新，但重新组合操作发生在 UI 线程上。
                         currentSpeed = speed
                         progress = prog
                     }
@@ -290,7 +290,7 @@ private fun ConfigView(
                 ) {
                     RadioButton(
                         selected = direction == selectedDirection,
-                        onClick = null // null because row is clickable
+                        onClick = null // 为空，因为该行可点击
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(

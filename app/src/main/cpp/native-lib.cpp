@@ -8,8 +8,37 @@
 #define TAG "NativeSecurity"
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
-static const char* EXPECTED_SIGNATURE =
-        "YOUR_RELEASE_SIGNATURE_SHA256_HERE";
+static bool isExpectedSignature(const jbyte* hash, jsize hashLen) {
+    if (hash == nullptr || hashLen != 32) return false;
+
+    // SHA-256 签名是在运行时从非文本片段中重建
+    // 占位签名示例 (全零 SHA-256)
+// 以下填写通过对签名文件hash值（去掉冒号）执行Python示例脚本生成的混淆双数组
+static const uint8_t partA[32] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+static const uint8_t partB[32] = {
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+constexpr uint8_t kXor = 0x5D;
+
+    const uintptr_t hashPtr = reinterpret_cast<uintptr_t>(hash);
+    for (int i = 0; i < 32; ++i) {
+        volatile uint8_t noise1 = static_cast<uint8_t>((hashPtr >> ((i % 7) + 1)) & 0xFFu);
+        volatile uint8_t noise2 = static_cast<uint8_t>((hashPtr >> ((i % 7) + 1)) & 0xFFu);
+        const uint8_t expected = static_cast<uint8_t>(partA[i] ^ partB[i] ^ kXor ^ noise1 ^ noise2);
+        if (static_cast<uint8_t>(hash[i]) != expected) {
+            return false;
+        }
+    }
+    return true;
+}
 
 static void clearPendingException(JNIEnv* env) {
     if (env->ExceptionCheck()) {
@@ -194,36 +223,44 @@ static void nativeVerifySignature(JNIEnv* env, jclass /* clazz */, jobject conte
 
     const jsize hashLen = env->GetArrayLength(hashBytes);
     jbyte* hash = env->GetByteArrayElements(hashBytes, nullptr);
-    char hexHash[65] = {};
-    for (int i = 0; i < hashLen; ++i) {
-        std::snprintf(hexHash + i * 2, 3, "%02X", static_cast<unsigned char>(hash[i]));
-    }
-    env->ReleaseByteArrayElements(hashBytes, hash, 0);
+    const bool match = isExpectedSignature(hash, hashLen);
+    env->ReleaseByteArrayElements(hashBytes, hash, JNI_ABORT);
 
-    if (std::strcmp(hexHash, EXPECTED_SIGNATURE) != 0) {
+    if (!match) {
         LOGE("Signature verification failed");
         abort();
     }
 }
 
 static jstring nativeGetNativeKey(JNIEnv* env, jobject /* this */) {
-// AES密钥示例: "MySecretKey12345" (16 bytes)
-    static const uint8_t encoded[16] = {
-            0x7E, 0x7D, 0x20, 0x5E, 0x5A, 0x60, 0x5A, 0x40,
-            0x2A, 0x38, 0x0E, 0x45, 0x00, 0x08, 0x09, 0x03
-    };
-    constexpr uint8_t seed = 0x33;
-    volatile uintptr_t ptrNoise = reinterpret_cast<uintptr_t>(env) & 0xFFu;
-    const uint8_t runtimeMask = static_cast<uint8_t>(ptrNoise);
+    // 密钥在运行时由两个非文本片段重新构建
+    // AES密钥示例: "MySecretKey12345" (16 bytes)
+// 以下填写通过对AES密钥执行Python示例脚本生成的混淆双数组
+static const uint8_t partA[16] = {
+        0x7E, 0x7D, 0x20, 0x5E, 0x5A, 0x60, 0x5A, 0x40,
+        0x2A, 0x38, 0x0E, 0x45, 0x00, 0x08, 0x09, 0x03
+};
+static const uint8_t partB[16] = {
+        0x57, 0xE0, 0x0D, 0x1F, 0x2F, 0x71, 0xAA, 0xC0,
+        0xF9, 0xD3, 0x80, 0x15, 0x4D, 0x4B, 0x18, 0xF8
+};
+constexpr uint8_t kXor = 0xA7;
 
     char decoded[17] = {};
+    const uintptr_t envPtr = reinterpret_cast<uintptr_t>(env);
     for (int i = 0; i < 16; ++i) {
-        uint8_t value = encoded[i] ^ static_cast<uint8_t>(seed + i);
-        value ^= runtimeMask;
-        value ^= runtimeMask;
-        decoded[i] = static_cast<char>(value);
+        // Two volatile reads avoid easy constant folding of canceling masks.
+        volatile uint8_t noise1 = static_cast<uint8_t>((envPtr >> ((i % 5) + 1)) & 0xFFu);
+        volatile uint8_t noise2 = static_cast<uint8_t>((envPtr >> ((i % 5) + 1)) & 0xFFu);
+        decoded[i] = static_cast<char>(partA[i] ^ partB[i] ^ kXor ^ noise1 ^ noise2);
     }
-    return env->NewStringUTF(decoded);
+
+    jstring out = env->NewStringUTF(decoded);
+    volatile char* wipe = decoded;
+    for (int i = 0; i < 17; ++i) {
+        wipe[i] = 0;
+    }
+    return out;
 }
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void*) {

@@ -8,6 +8,7 @@ import xyz.a202132.app.AppConfig
 import xyz.a202132.app.data.model.Node
 import xyz.a202132.app.data.model.NodeType
 import android.net.Uri
+import kotlinx.coroutines.withTimeout
 import java.net.URLDecoder
 import java.security.MessageDigest
 
@@ -24,7 +25,9 @@ class SubscriptionParser {
      */
     suspend fun fetchAndParse(url: String = AppConfig.SUBSCRIPTION_URL): Result<List<Node>> {
         return try {
-            val response = NetworkClient.apiService.getSubscription(url)
+            val response = withTimeout(AppConfig.NODE_REQUEST_TIMEOUT_MS) {
+                NetworkClient.apiService.getSubscription(url)
+            }
             val nodes = parseSubscription(response)
             Result.success(nodes)
         } catch (e: Exception) {
@@ -38,13 +41,12 @@ class SubscriptionParser {
      */
     fun parseSubscription(content: String): List<Node> {
         Log.d(tag, "Original content length: ${content.length}")
-        Log.d(tag, "Original content preview: ${content.take(100)}...")
 
         var finalContent = ""
         
         try {
             var decrypted = xyz.a202132.app.util.CryptoUtils.decryptNodes(content.trim())
-            Log.d(tag, "Decryption result preview: ${decrypted.take(100)}...")
+            Log.d(tag, "Decryption result length: ${decrypted.length}, hasLinks: ${decrypted.contains("://")}")
              
             // 如果解密成功但不含 "://"，可能是先 Base64 编码再 AES 加密的
             // 尝试再做一次 Base64 解码
@@ -114,7 +116,8 @@ class SubscriptionParser {
                 else -> null
             }
         } catch (e: Exception) {
-            Log.e(tag, "Failed to parse link: $link", e)
+            val scheme = link.substringBefore("://", "unknown")
+            Log.e(tag, "Failed to parse link, scheme=$scheme, length=${link.length}", e)
             null
         }
     }
@@ -204,8 +207,8 @@ class SubscriptionParser {
     }
 
     /**
-     * Parse AnyTLS link
-     * Format: anytls://password@host:port?params#name
+     * 解析 AnyTLS 链接
+     * 格式: anytls://password@host:port?params#name
      */
     private fun parseAnyTlsLink(link: String): Node {
         val uri = Uri.parse(link)
@@ -224,8 +227,8 @@ class SubscriptionParser {
     }
 
     /**
-     * Parse TUIC link
-     * Format: tuic://uuid:password@host:port?params#name
+     * 解析 TUIC 链接
+     * 格式: tuic://uuid:password@host:port?params#name
      */
     private fun parseTuicLink(link: String): Node {
         val uri = Uri.parse(link)
@@ -244,8 +247,8 @@ class SubscriptionParser {
     }
 
     /**
-     * Parse Naive link
-     * Format: naive+https://username:password@host:port?params#name
+     * 解析 Naive 链接
+     * 格式: naive+https://username:password@host:port?params#name
      */
     private fun parseNaiveLink(link: String): Node {
         val uri = Uri.parse(link)
@@ -264,8 +267,8 @@ class SubscriptionParser {
     }
 
     /**
-     * Parse WireGuard link
-     * Format: wireguard://private_key@host:port?params#name
+     * 解析 WireGuard 链接
+     * 格式: wireguard://private_key@host:port?params#name
      */
     private fun parseWireGuardLink(link: String): Node {
         val uri = Uri.parse(link)

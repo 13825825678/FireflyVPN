@@ -116,7 +116,7 @@ data class Node(
      */
     fun getLatencyText(): String {
         return when {
-            latency == -1 -> "测试中"
+            latency == -1 -> "未测试"
             latency == -2 -> "超时"
             !isAvailable && autoTestStatus.contains("FILTERED", ignoreCase = true) -> "不达标"
             !isAvailable -> "不可用"
@@ -142,7 +142,7 @@ enum class LatencyLevel {
 }
 
 /**
- * Room TypeConverter for NodeType
+ * 节点类型转换器
  */
 class NodeTypeConverter {
     @TypeConverter

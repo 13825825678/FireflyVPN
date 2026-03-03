@@ -53,6 +53,7 @@ fun AutoTestResultDialog(
     nodes: List<Node>,
     onDismiss: () -> Unit,
     onNodeClick: (Node) -> Unit,
+    autoConnectLabel: String = "自动连接最优",
     onAutoConnectBest: (() -> Unit)? = null
 ) {
     var showSearch by remember { mutableStateOf(false) }
@@ -172,7 +173,7 @@ fun AutoTestResultDialog(
                         onClick = onAutoConnectBest,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("自动连接最优")
+                        Text(autoConnectLabel)
                     }
                 }
             }
