@@ -68,6 +68,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private var lastFetchNodesTime = 0L
     private var lastBackupSwitchTime = 0L
     private var lastCheckUpdateTime = 0L
+    // 缓存最新拉取的节点，供launchStartupDefaultTestIfNeeded使用（避免 Room Flow 延迟导致测旧节点）
+    private var lastFetchedNodes: List<Node>? = null
     
     // UI状态
     private val _isLoading = MutableStateFlow(false)
@@ -445,6 +447,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 // 保存到数据库
                 nodeDao.replaceAllNodes(fetchedNodes)
+                // 缓存最新节点，供后续自动测试使用（避免 Room Flow 延迟导致测旧节点）
+                lastFetchedNodes = fetchedNodes
 
                 if (BuildConfig.DEBUG) {
                     viewModelScope.launch(Dispatchers.IO) {
@@ -1941,11 +1945,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun launchStartupDefaultTestIfNeeded(showHint: Boolean = false) {
+        // 取出缓存的最新节点（避免 Room Flow 延迟导致测旧节点）
+        val freshNodes = lastFetchedNodes
+        lastFetchedNodes = null
         viewModelScope.launch {
             val mode = settingsRepository.startupDefaultTestMode.first()
             val ready = waitForNodesReadyWithAutoRetry(timeoutMs = AppConfig.NODE_REQUEST_TIMEOUT_MS)
             if (!ready) return@launch
-            runDefaultStartupTestIfNeeded(mode, showHint)
+            runDefaultStartupTestIfNeeded(mode, showHint, freshNodes)
         }
     }
 
@@ -1966,9 +1973,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 fetchingLabel = "请求节点中"
             )
             if (!fetchOk) return@launch
+            // 取出缓存的最新节点（避免 Room Flow 延迟导致测旧节点）
+            val freshNodes = lastFetchedNodes
+            lastFetchedNodes = null
             val ready = waitForNodesReadyWithAutoRetry(timeoutMs = AppConfig.NODE_REQUEST_TIMEOUT_MS)
             if (!ready) return@launch
-            runDefaultStartupTestIfNeeded(mode, showHint = false)
+            runDefaultStartupTestIfNeeded(mode, showHint = false, freshNodes)
         }
     }
 
@@ -2014,17 +2024,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return Result.failure(second.exceptionOrNull() ?: first.exceptionOrNull() ?: IllegalStateException("${requestName}请求失败"))
     }
 
-    private fun runDefaultStartupTestIfNeeded(mode: StartupDefaultTestMode, showHint: Boolean) {
+    private fun runDefaultStartupTestIfNeeded(
+        mode: StartupDefaultTestMode,
+        showHint: Boolean,
+        freshNodes: List<Node>? = null
+    ) {
         if (mode == StartupDefaultTestMode.NONE) return
         if (_isTesting.value || _autoTestProgress.value.running) return
         when (mode) {
             StartupDefaultTestMode.TCPING -> {
                 if (showHint) _error.value = "已按默认设置执行 TCPing 测试"
-                testAllNodes()
+                testAllNodes(freshNodes)
             }
             StartupDefaultTestMode.URL_TEST -> {
                 if (showHint) _error.value = "已按默认设置执行 URL Test 测试"
-                urlTestAllNodes()
+                urlTestAllNodes(freshNodes)
             }
             StartupDefaultTestMode.NONE -> Unit
         }
