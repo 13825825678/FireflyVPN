@@ -30,7 +30,7 @@ data class UnlockPrioritySite(
  */
 object AppConfig {
     // API URLs
-    const val SUBSCRIPTION_URL = "https://your-server.com/api//nodes" // 订阅URL
+    const val SUBSCRIPTION_URL = "https://raw.githubusercontent.com/13825825678/mysub/refs/heads/main/sub.txt" // 订阅URL
     const val UPDATE_URL = "https://your-server.com/api//update" // 检查更新URL
     const val NOTICE_URL = "https://your-server.com/api//notice" // 公告通知URL
     const val WEBSITE_URL = "https://your-website.com" // 官网网站
